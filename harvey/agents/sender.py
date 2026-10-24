@@ -299,6 +299,18 @@ class Sender:
             f"with {len(leads)} leads. Campaign ID: {campaign_id}"
         )
 
+    def _compliance_footer(self) -> str:
+        """CAN-SPAM footer appended to every native send; '' when unconfigured."""
+        c = getattr(self.config, "compliance", None)
+        address = (getattr(c, "postal_address", "") or "").strip()
+        if not address:
+            return ""
+        company = self.config.persona.company
+        lines = ["", "", "--", f"{company} · {address}"]
+        if c.opt_out_line:
+            lines.append(c.opt_out_line)
+        return "\n".join(lines)
+
     async def _count_sends_today(self) -> int:
         """Count how many prospects were contacted today."""
         import aiosqlite
@@ -476,8 +488,17 @@ class Sender:
                 )
                 continue
 
+            footer = self._compliance_footer()
+            if not footer:
+                await self.state.update_outbox_item(
+                    item["id"], status="failed",
+                    error="gate: compliance.postal_address is not set in harvey.yaml",
+                )
+                logger.warning("Sender: no postal address configured; refusing to send")
+                continue
+
             result = await self.provider.send_email(
-                item["to_email"], item["subject"], item["body"],
+                item["to_email"], item["subject"], item["body"] + footer,
                 thread_ref=item.get("thread_ref", ""),
                 in_reply_to=item.get("in_reply_to", ""),
             )

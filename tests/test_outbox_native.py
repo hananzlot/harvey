@@ -59,6 +59,10 @@ class FakeProvider(MailProvider):
 
 
 class Cfg:
+    class compliance:
+        postal_address = "1 Main St, Springfield"
+        opt_out_line = 'Reply "stop" to opt out.'
+
     class persona:
         name = "Harvey"; email = "harvey@x.co"; company = "X"; role = "BD"; tone = "direct"
 
@@ -225,10 +229,27 @@ async def test_drain_sends_approved_due_items(state):
     assert len(sent) == 1                     # step 1 due now; step 2 in 3 days
     assert provider.sent[0]["to"] == "jane@acme.com"
     assert provider.sent[0]["subject"] == "hi Jane"
+    assert provider.sent[0]["body"].endswith(
+        'X · 1 Main St, Springfield\nReply "stop" to opt out.'
+    )
     prospect = await state.get_prospect(pid)
     assert prospect.status == "contacted"
     approved_left = await state.get_outbox(status="approved")
     assert len(approved_left) == 1 and approved_left[0]["step"] == 2
+
+
+@pytest.mark.asyncio
+async def test_drain_refuses_without_postal_address(state):
+    pid = await seed_prospect(state)
+    await seed_campaign(state, [pid])
+    provider = FakeProvider()
+    sender = make_sender(state, provider, require_approval=False)
+    sender.config.compliance = type("C", (), {"postal_address": "", "opt_out_line": ""})
+
+    await sender._run_native()
+    assert provider.sent == []
+    failed = await state.get_outbox(status="failed")
+    assert failed and "postal_address" in failed[0]["error"]
 
 
 @pytest.mark.asyncio

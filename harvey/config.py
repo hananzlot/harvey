@@ -152,12 +152,22 @@ class UsageConfig(BaseModel):
         return v
 
 
+class ComplianceConfig(BaseModel):
+    # CAN-SPAM: every commercial email must carry the sender's valid physical
+    # postal address and a working opt-out. Native providers (gmail/smtp) send
+    # the drafted body as-is, so Harvey appends this footer at send time and
+    # refuses to send while postal_address is empty.
+    postal_address: str = ""
+    opt_out_line: str = 'Not the right fit? Reply "stop" and I won\'t email you again.'
+
+
 class HarveyConfig(BaseModel):
     persona: PersonaConfig
     product: ProductConfig
     icp: ICPConfig
     channels: ChannelsConfig = ChannelsConfig()
     usage: UsageConfig = UsageConfig()
+    compliance: ComplianceConfig = ComplianceConfig()
 
 
 class EnvConfig(BaseModel):
