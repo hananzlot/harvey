@@ -418,18 +418,25 @@ def cmd_discover(args):
         # Semicolons, not commas: "Denver, CO" is one city, not two.
         cities = [c.strip() for c in args.city.split(";") if c.strip()] or None
         queries = build_queries(config, cities=cities,
-                                depth=args.depth, limit=args.limit)
+                                depth=args.depth, limit=args.limit,
+                                provider=args.provider)
 
         report = await run_discovery(state, config, args.provider, queries,
                                      max_spend=args.max_spend, dry_run=True)
         print(f"\n  {len(queries)} queries via {PROVIDERS[args.provider].label}")
         for q in queries[:8]:
+            if args.provider == "cslb":
+                print(f"    - {q.term} ({q.category}) in {', '.join(q.counties)}")
+                continue
             print(f"    - {q.keyword()}" + ("" if q.coordinate else
                   "   (no coordinates — add icp.geo_coordinates for radius search)"))
         if len(queries) > 8:
             print(f"    ... and {len(queries) - 8} more")
         print(f"\n  Estimated cost: ${report.estimated_cost:.4f}"
               f"   (cap: ${args.max_spend:.2f})")
+        if args.provider == "cslb":
+            print("  The licence list is free; the estimate is website lookups "
+                  "($0.0006 each), which stop at the cap.")
 
         if args.estimate:
             print("\n  Estimate only. Re-run without --estimate to collect.\n")
@@ -450,6 +457,11 @@ def cmd_discover(args):
         print(f"    {r.get('junk', 0)} filtered out as directories/aggregators")
         print(f"    {r.get('observations', 0)} observations recorded")
         print(f"    actual cost: ${r.get('actual_cost', 0):.4f}")
+        if args.provider == "cslb":
+            print(f"    website lookups: {r.get('website_lookups', 0)} done, "
+                  f"{r.get('websites_found', 0)} sites found, "
+                  f"{r.get('websites_remaining', 0)} companies still to look up "
+                  f"(re-run to continue)")
         if r.get("stopped"):
             print(f"    stopped early: {r['stopped']}")
 

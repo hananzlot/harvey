@@ -65,6 +65,14 @@ class ICPConfig(BaseModel):
     #   "Denver, CO": "39.7392,-104.9903,50"
     # Without one, listings providers can only match on the business name.
     geo_coordinates: dict[str, str] = {}
+    # California counties for the CSLB licence-list provider (`harvey discover
+    # --provider cslb`). Empty -> derived from `geography` (LA, Orange, San
+    # Diego, Inland Empire -> Riverside + San Bernardino), else the five SoCal
+    # counties. At most 10 (the CSLB form's own limit).
+    counties: list[str] = []
+    # Extra/overriding industry-keyword -> CSLB classification, e.g.
+    # {"plumb": "C-36"}. Built in: roofing -> C-39, solar -> C-46.
+    cslb_classifications: dict[str, str] = {}
 
 
 class EmailChannelConfig(BaseModel):

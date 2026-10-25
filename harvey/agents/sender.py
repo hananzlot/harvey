@@ -345,6 +345,7 @@ class Sender:
 
     def _render(self, text: str, prospect) -> str:
         """Fill merge variables. The pre-send gate rejects any leftovers."""
+        text = self._business_greeting(text, prospect)
         replacements = {
             "first_name": prospect.first_name,
             "last_name": prospect.last_name,
@@ -356,6 +357,22 @@ class Sender:
             text = text.replace("{{" + key + "}}", value or "")
             text = text.replace("{{ " + key + " }}", value or "")
         return text.strip()
+
+    @staticmethod
+    def _business_greeting(text: str, prospect) -> str:
+        """Natural greeting when there is no personal name to merge.
+
+        A business contact (office@, an owner's gmail, no named person) has an
+        empty first name. ``{{first_name}}`` becomes "there": "Hi {{first_name}},"
+        -> "Hi there,", and a line that opens with the bare tag gets a "Hi "
+        so it never starts "there, ...". Real unrendered tags are untouched
+        (the pre-send gate still blocks them).
+        """
+        if (getattr(prospect, "first_name", "") or "").strip():
+            return text
+        tag = r"\{\{\s*first_name\s*\}\}"
+        text = re.sub(r"(?m)^(\s*)" + tag, r"\1Hi there", text)
+        return re.sub(tag, "there", text)
 
     async def _stage_campaign_native(self, campaign):
         """Render + schedule a draft campaign's emails into the outbox."""

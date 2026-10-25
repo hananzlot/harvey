@@ -793,6 +793,7 @@ def _discovery_queries(body: dict, config):
         config, cities=cities,
         depth=int(body.get("depth") or 30),
         limit=int(body.get("limit") or 100),
+        provider=body.get("provider") or "",
     )
 
 

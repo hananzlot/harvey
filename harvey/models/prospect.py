@@ -34,6 +34,9 @@ class Prospect(BaseModel):
     company: str = ""
     industry: str = ""
     company_size: str = ""
+    # 'person' = a named human; 'business' = a published business address
+    # (office@, info@, an owner's gmail) with no named person behind it.
+    contact_kind: str = "person"
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -48,9 +51,27 @@ class Prospect(BaseModel):
     def _strip_linkedin(cls, v: str) -> str:
         return (v or "").strip()
 
+    def is_business(self) -> bool:
+        return self.contact_kind == "business"
+
     def full_name(self) -> str:
         return f"{self.first_name} {self.last_name}".strip()
 
+    def display_name(self) -> str:
+        """A readable label even when no person is named."""
+        name = self.full_name()
+        if name:
+            return name
+        return f"{self.title or 'Owner'} of {self.company}" if self.company else (self.title or "Owner")
+
+    def greeting_name(self) -> str:
+        """What {{first_name}} renders as: the first name, or "there"."""
+        return self.first_name.strip() or "there"
+
     def is_valid(self) -> bool:
-        """A contact must have at minimum a name and title."""
+        """A person needs a name and title. A business contact (a published
+        business address) needs no personal name, but must have a title, a
+        company and an email."""
+        if self.is_business():
+            return bool(self.title and (self.company or self.company_id) and self.email)
         return bool(self.first_name and self.last_name and self.title)

@@ -612,3 +612,29 @@ async def find_email(
 
     logger.info(f"Email for {first_name} {last_name}@{domain}: {candidate} [{status}]")
     return EmailResult(email=candidate, status=status, pattern=pattern, mx_type=mx_type)
+
+
+async def verify_address(email: str, env=None, state=None) -> EmailResult:
+    """Grade an address we READ off a website (nothing is guessed here).
+
+    Same verifiers and the same honesty as ``find_email``: verified / risky
+    / invalid, or ``guess`` when no verifier could decide. A domain with no
+    MX record cannot receive mail, so it is ``invalid`` without spending a
+    verification credit.
+    """
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        return EmailResult(email="", status="invalid")
+    domain = _clean_domain(email.split("@", 1)[1])
+    mx_host = await get_mx_host(domain)
+    if not mx_host:
+        return EmailResult(email=email, status="invalid", mx_type="none")
+    mx_type = classify_mx(mx_host)
+    status, catch_all = await _verify_candidate(email, mx_type, env)
+    if catch_all and state is not None:
+        try:
+            await state.save_email_pattern(domain, mx_type=mx_type, is_catch_all=1)
+        except Exception:
+            pass
+    logger.info(f"Published address {email}: [{status or 'guess'}]")
+    return EmailResult(email=email, status=status or "guess", mx_type=mx_type)

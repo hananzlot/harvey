@@ -37,7 +37,10 @@ from bs4 import BeautifulSoup
 
 from harvey.brain import Brain
 from harvey.config import HarveyConfig, EnvConfig
-from harvey.integrations.email_finder import find_email
+from harvey.integrations.email_finder import find_email, verify_address
+from harvey.integrations.site_contacts import (
+    find_owner_name, harvest_emails, rank_business_emails,
+)
 from harvey.integrations.linkedin import LinkedInAutomation
 from harvey.models.company import Company
 from harvey.models.prospect import Prospect
@@ -64,6 +67,14 @@ MAX_PROSPECTS_PER_CYCLE = 25
 # integrations/email_finder.py); this just paces it, since a heartbeat every
 # 15 minutes would spend a free-tier month in a few hours otherwise.
 HUNTER_DOMAINS_PER_CYCLE = 1
+
+# Companies whose site may yield a BUSINESS contact (a published office@ /
+# info@ / owner-gmail address) when no named ICP person is found. Limited to
+# sources that are verified real contractors: a licence-board list, not the
+# SEO / lead-gen sites that general discovery also turns up.
+BUSINESS_CONTACT_SOURCES = ("discover:cslb",)
+# Pages a small contractor site publishes its contact details on.
+BUSINESS_PAGES = ("", "/contact", "/contact-us", "/about", "/about-us")
 
 # Rotate a small pool of realistic desktop user-agents. Scrapers that always
 # send one UA are trivially fingerprinted and blocked.
@@ -609,6 +620,7 @@ class Scout:
                 company_name=company.get("name") or self._domain_to_name(domain),
                 industry=company.get("industry") or default_industry,
                 source="known_company_backfill",
+                business_fallback=(company.get("source") or "") in BUSINESS_CONTACT_SOURCES,
             )
 
             # Mark it checked regardless of outcome, so a company with no
@@ -623,8 +635,8 @@ class Scout:
                 await self.state.add_prospect(prospect)
                 count += 1
                 logger.info(
-                    f"Scout: Added {prospect.full_name()} ({prospect.title}) "
-                    f"at {prospect.company} [backfill]"
+                    f"Scout: Added {prospect.display_name()} ({prospect.title}) "
+                    f"at {prospect.company} [backfill{', business address' if prospect.is_business() else ''}]"
                 )
                 if count >= MAX_PROSPECTS_PER_CYCLE:
                     return count
@@ -1400,13 +1412,20 @@ Respond ONLY with the JSON array."""
         industry: str,
         signal_note: str = "",
         source: str = "company_website",
+        business_fallback: bool = False,
     ) -> list[Prospect]:
-        """Team-page scrape → ICP-matched, email-resolved, deduped prospects."""
+        """Team-page scrape → ICP-matched, email-resolved, deduped prospects.
+
+        With ``business_fallback``, a site that names no ICP person falls back
+        to its published business address (see ``_business_contact``).
+        """
         try:
             team_members = await self._scrape_team_page(domain)
         except Exception as e:
             logger.debug(f"Team scrape failed for {domain}: {e}")
-            return []
+            team_members = []
+            if not business_fallback:
+                return []
 
         contacts: list[Prospect] = []
         for member in team_members:
@@ -1446,7 +1465,94 @@ Respond ONLY with the JSON array."""
 
             self._remember_prospect(prospect)
             contacts.append(prospect)
+
+        if not contacts and business_fallback:
+            fallback = await self._business_contact(
+                company_id=company_id, domain=domain, company_name=company_name,
+                industry=industry, signal_note=signal_note, source=source,
+            )
+            if fallback:
+                contacts.append(fallback)
         return contacts
+
+    async def _business_contact(
+        self,
+        company_id: str,
+        domain: str,
+        company_name: str,
+        industry: str,
+        signal_note: str = "",
+        source: str = "company_website",
+    ) -> Prospect | None:
+        """The company's published address as a contact, or None.
+
+        Reads the home, contact and about pages. Prefers an address at the
+        company's own domain, else a free-mail (gmail/yahoo/...) address the
+        site itself publishes; placeholders are discarded. If the page names
+        an owner ("My name is Todd Young, owner of ...") that person becomes
+        the contact (title Owner); otherwise a business contact with no
+        personal name. The address is verified like any other: only a
+        deliverable status ever sends.
+        """
+        base, _ = await self._resolve_base_url(domain)
+        if not base:
+            return None
+
+        emails: list[str] = []
+        texts: list[str] = []
+        for path in BUSINESS_PAGES:
+            resp = await self._fetch(f"{base}{path}", timeout=SCRAPE_TIMEOUT, retries=1)
+            if resp is None:
+                continue
+            soup = self._safe_soup(resp.text)
+            hrefs: list[str] = []
+            if soup is not None:
+                try:
+                    hrefs = [self._attr_str(a.get("href"))
+                             for a in soup.find_all("a", href=True)
+                             if self._attr_str(a.get("href")).lower().startswith("mailto:")]
+                except Exception:
+                    hrefs = []
+            texts.append(resp.text)
+            for addr in harvest_emails(resp.text, hrefs):
+                if addr not in emails:
+                    emails.append(addr)
+
+        ranked = rank_business_emails(emails, domain, company_name)
+        owner = find_owner_name(" ".join(texts))
+        if not ranked and not owner:
+            return None
+
+        email, email_status = "", ""
+        if ranked:
+            result = await verify_address(ranked[0], env=self.env, state=self.state)
+            email, email_status = result.email, result.status
+        elif owner:
+            email, email_status = await self._resolve_email(owner[0], owner[1], domain)
+        if not email:
+            return None
+
+        first, last = owner if owner else ("", "")
+        prospect = Prospect(
+            first_name=first,
+            last_name=last,
+            email=email,
+            email_status=email_status,
+            email_verified=(email_status == "verified"),
+            company=company_name,
+            company_id=company_id,
+            title="Owner",
+            seniority="c_suite",
+            industry=industry,
+            source=source,
+            source_url=f"https://{domain}",
+            personalization_notes=signal_note,
+            contact_kind="person" if owner else "business",
+        )
+        if not prospect.is_valid() or await self._is_duplicate_prospect(prospect):
+            return None
+        self._remember_prospect(prospect)
+        return prospect
 
     # ── Strategy 4: Job boards — companies hiring for signal roles ──
 

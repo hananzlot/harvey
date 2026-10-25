@@ -175,11 +175,19 @@ class Writer:
 
     async def _write_personal_email(self, prospect) -> dict | None:
         """One grounded draft for one person. Facts in, one email out."""
-        facts = [
-            f"- Name: {prospect.full_name()}",
-            f"- Title: {prospect.title}",
-            f"- Company: {prospect.company}",
-        ]
+        business = prospect.is_business() or not prospect.full_name()
+        if business:
+            facts = [
+                "- Contact: the business's published address, no personal "
+                "name is known",
+                f"- Company: {prospect.company}",
+            ]
+        else:
+            facts = [
+                f"- Name: {prospect.full_name()}",
+                f"- Title: {prospect.title}",
+                f"- Company: {prospect.company}",
+            ]
         if prospect.industry:
             facts.append(f"- Industry: {prospect.industry}")
 
@@ -216,6 +224,15 @@ class Writer:
             prompt += "\n\n" + self.skills
         prompt += self._guidance_block()
 
+        business_rule = (
+            "- This goes to the business's published address and no personal name is "
+            "known. Open with \"Hi there,\" and address the owner of "
+            f"{prospect.company} naturally (for example \"I'm writing to whoever runs "
+            f"{prospect.company}\"). Never invent a name, never write a placeholder "
+            "like [Name] or {{first_name}}.\n"
+            if business else ""
+        )
+
         prompt += f"""
 
 Write ONE cold email (the very first touch) to this specific person.
@@ -230,7 +247,7 @@ Requirements:
 - Under 75 words. One specific observation from the FACTS above, one
   question. No pitch, no product name.
 - Write the actual text (no merge variables — you know their name/company).
-- Subject: lowercase, 2-5 words.
+{business_rule}- Subject: lowercase, 2-5 words.
 - Follow every STRICT EMAIL RULE above.
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
@@ -251,7 +268,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         """Ask the brain to write a 3-email sequence."""
         # Build context about the prospects
         prospect_summary = "\n".join(
-            f"- {p.full_name()}, {p.title} at {p.company}"
+            f"- {p.display_name()}, {p.title} at {p.company}"
             + (f" | Notes: {p.personalization_notes}" if p.personalization_notes else "")
             for p in prospects[:5]  # Show sample for context
         )
@@ -292,7 +309,9 @@ Requirements:
 - Email 2: Follow-up 3 days later. Different angle, one concrete proof point. Under 75 words.
 - Email 3: Break-up email 4 days after that. Under 40 words. Gracious, not guilt-tripping.
 - Use {{{{first_name}}}}, {{{{company}}}}, {{{{title}}}} as merge variables — every email
-  must use at least one, and email 1 must reference something specific to
+  must use at least one. Some contacts are a business's published address with no
+  personal name; for them {{{{first_name}}}} renders as "there" ("Hi there,"), so always
+  open "Hi {{{{first_name}}}}," and never put the tag mid-sentence, and email 1 must reference something specific to
   these prospects' industry or role (use the notes above).
 - Never be pushy or salesy. Be consultative and value-driven.
 - Subject lines: lowercase, 2-5 words.

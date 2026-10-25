@@ -208,6 +208,7 @@ class DiscoveryQuery:
     coordinate: str = ""             # "lat,lng,radius_km" for listings providers
     depth: int = 30                  # SERP depth; ignored by listings providers
     limit: int = 100                 # max records to take from one query
+    counties: list[str] = field(default_factory=list)  # cslb: counties to download
 
     def keyword(self) -> str:
         return f"{self.term} {self.location}".strip()
@@ -359,6 +360,7 @@ class DataForSEOSerp(DiscoveryProvider):
               "below rank 30 it is mostly directories anyway.")
 
     PAGE_COST = 0.0006
+    LOCATION_CODE = 2840        # United States
 
     def estimate(self, queries):
         # Billing is base price x number of pages, 10 results to a page.
@@ -372,7 +374,10 @@ class DataForSEOSerp(DiscoveryProvider):
             f"{self.base_url(env)}/serp/google/organic/live/advanced",
             headers={"Authorization": f"Basic {self._auth(env)}",
                      "Content-Type": "application/json"},
+            # DataForSEO rejects a SERP task with no location (40501
+            # "Invalid Field: location_name"); the city is in the keyword.
             json=[{"keyword": query.keyword(), "language_code": "en",
+                   "location_code": self.LOCATION_CODE,
                    "depth": query.depth, "device": "desktop"}],
         )
         r.raise_for_status()
@@ -588,12 +593,70 @@ class OpenStreetMap(DiscoveryProvider):
         return out
 
 
+class CSLB(DiscoveryProvider):
+    """California licensed contractors, straight from the state board.
+
+    Free and official: every active licence in the chosen classifications and
+    counties, with business name, address and phone. No emails, no websites —
+    the website finder (paid SERP lookups, capped by --max-spend) fills in
+    domains afterwards, and the scout harvests published addresses from them.
+    """
+
+    key = "cslb"
+    label = "CSLB California contractor licences"
+    kind = "licensing"
+    blurb = ("Every ACTIVE California contractor licence for your trades "
+             "(roofing C-39, solar C-46, ...) in your counties, from the "
+             "state's free public download. Then looks up each business's "
+             "website, within your spend cap.")
+    cost_note = ("List: free. Website lookups: $0.0006 each (one SERP page), "
+                 "stopping at --max-spend")
+    free_tier = "The licence list is free, no account"
+    signup_url = "https://www.cslb.ca.gov/OnlineServices/DataPortal/ListByCounty"
+    env_keys = ()
+    caveat = ("California only. Website lookups need DATAFORSEO_LOGIN / "
+              "DATAFORSEO_PASSWORD; without them the licence list is still "
+              "saved. No email addresses come from CSLB itself.")
+
+    # Spend is made of website lookups that stop at the cap, so a run can
+    # never exceed it; the estimate is an upper bound clamped to the cap.
+    self_limiting = True
+    PLANNED_LOOKUPS_PER_QUERY = 1000
+
+    def estimate(self, queries):
+        return sum(DataForSEOSerp.PAGE_COST * self.PLANNED_LOOKUPS_PER_QUERY
+                   for _ in queries)
+
+    async def fetch(self, client, env, query):
+        from harvey.collectors import cslb
+
+        counties = query.counties or cslb.DEFAULT_COUNTIES
+        content = await cslb.download(client, query.category, counties)
+        out = []
+        for lic in cslb.parse_workbook(content):
+            if not lic.is_active() or not lic.holds(query.category):
+                continue
+            out.append(Business(
+                name=lic.name,
+                phone=lic.phone,
+                address=lic.address,
+                location=lic.address,
+                category=query.term,
+                has_website=None,       # unknown until the website finder runs
+                external_id=f"cslb:{lic.number}",
+                source_url=cslb.FORM_URL,
+                provider=self.key,
+            ))
+        return out
+
+
 PROVIDERS: dict[str, DiscoveryProvider] = {
     p.key: p for p in (
         OpenStreetMap(),
         DataForSEOListings(),
         DataForSEOSerp(),
         Serper(),
+        CSLB(),
     )
 }
 
@@ -643,6 +706,9 @@ class DiscoveryReport:
     run_id: str = ""
     errors: list[str] = field(default_factory=list)
     stopped: str = ""
+    website_lookups: int = 0
+    websites_found: int = 0
+    websites_remaining: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -655,18 +721,29 @@ class DiscoveryReport:
             "observations": self.observations,
             "run_id": self.run_id, "errors": self.errors,
             "stopped": self.stopped,
+            "website_lookups": self.website_lookups,
+            "websites_found": self.websites_found,
+            "websites_remaining": self.websites_remaining,
         }
 
 
 def build_queries(config, cities: list[str] | None = None,
-                  depth: int = 30, limit: int = 100) -> list[DiscoveryQuery]:
+                  depth: int = 30, limit: int = 100,
+                  provider: str = "") -> list[DiscoveryQuery]:
     """Turn the configured ICP into a concrete query list.
 
     One query per (industry x city). Coordinates come from
     ``icp.geo_coordinates`` when present, because listings providers need a
     radius, not a place name.
+
+    ``cslb`` is different: one query per licence classification the ICP
+    industries map to (roofing -> C-39, solar -> C-46), each covering the
+    configured counties (``icp.counties``; ``cities``, when given, names
+    counties instead).
     """
     icp = config.icp
+    if provider == "cslb":
+        return build_cslb_queries(config, counties=cities)
     terms = list(icp.industries) or [config.product.name]
     places = cities if cities is not None else list(icp.geography) or [""]
     coords = getattr(icp, "geo_coordinates", {}) or {}
@@ -676,6 +753,22 @@ def build_queries(config, cities: list[str] | None = None,
                        coordinate=coords.get(place, ""))
         for term in terms
         for place in places
+    ]
+
+
+def build_cslb_queries(config, counties: list[str] | None = None
+                       ) -> list[DiscoveryQuery]:
+    from harvey.collectors import cslb
+
+    icp = config.icp
+    names = cslb.resolve_counties(counties or getattr(icp, "counties", None),
+                                  icp.geography)
+    pairs = cslb.classifications_for(
+        list(icp.industries), getattr(icp, "cslb_classifications", None))
+    return [
+        DiscoveryQuery(term=industry, location=f"{code}, {', '.join(names)}",
+                       category=code, counties=names)
+        for industry, code in pairs
     ]
 
 
@@ -706,11 +799,13 @@ async def run_discovery(
     if provider is None:
         raise ValueError(f"unknown discovery provider: {provider_key!r}")
 
-    queries = queries or build_queries(config)
+    queries = queries or build_queries(config, provider=provider_key)
     if provider.kind == "listings":
         queries = await resolve_coordinates(state, queries)
     report = DiscoveryReport(provider=provider_key, queries=len(queries))
     report.estimated_cost = provider.estimate(queries)
+    if getattr(provider, "self_limiting", False):
+        report.estimated_cost = min(report.estimated_cost, max_spend)
 
     if dry_run:
         return report
@@ -723,7 +818,7 @@ async def run_discovery(
         report.stopped = "not configured"
         return report
 
-    if report.estimated_cost > max_spend:
+    if report.estimated_cost > max_spend and not getattr(provider, "self_limiting", False):
         report.errors.append(
             f"estimated ${report.estimated_cost:.2f} exceeds the ${max_spend:.2f} "
             f"cap — raise the cap or run fewer queries")
@@ -758,6 +853,9 @@ async def run_discovery(
                     break
                 if i and provider.key == "osm":
                     await asyncio.sleep(OpenStreetMap.MIN_INTERVAL)
+                if i and provider.key == "cslb":
+                    from harvey.collectors.cslb import POLITE_DELAY_SECONDS
+                    await asyncio.sleep(POLITE_DELAY_SECONDS)
 
                 try:
                     provider.last_cost = 0.0
@@ -796,6 +894,9 @@ async def run_discovery(
                     report.observations += await state.add_observations(
                         batch, run_id=report.run_id)
 
+            if provider_key == "cslb" and not report.stopped:
+                await _find_websites(state, env, client, report, max_spend)
+
         await state.finish_run(report.run_id, status="completed",
                                records=report.new_companies + report.known_companies,
                                cost_usd=report.actual_cost)
@@ -806,6 +907,31 @@ async def run_discovery(
                                records=report.new_companies,
                                cost_usd=report.actual_cost, error=str(e))
     return report
+
+
+async def _find_websites(state, env: dict, client, report: "DiscoveryReport",
+                         max_spend: float) -> None:
+    """After a CSLB download: paid website lookups for companies with no domain.
+
+    Bounded by what is left of ``max_spend``; resumes next run (each company
+    is stamped once looked up). The licence list is already saved, so a
+    missing key or a failure here only skips the lookups.
+    """
+    from harvey.collectors.website_finder import run_lookups
+
+    async def paused():
+        return bool(await state.get_setting("discovery_paused"))
+
+    res = await run_lookups(state, client, env, "discover:cslb",
+                            budget=max(0.0, max_spend - report.actual_cost),
+                            pause_check=paused)
+    report.actual_cost += res["cost"]
+    report.website_lookups = res["looked_up"]
+    report.websites_found = res["found"]
+    report.websites_remaining = res["remaining"]
+    report.errors.extend(f"website lookup: {e}" for e in res["errors"][:5])
+    if res["stopped"] and res["stopped"] != "budget reached":
+        report.errors.append(f"website lookups stopped: {res['stopped']}")
 
 
 async def _upsert(state, biz: Business, query: DiscoveryQuery) -> tuple[str, bool]:
@@ -848,7 +974,8 @@ def _observations(biz: Business, company_id: str, confirmed: set[str],
                 "run_id": run_id,
             })
 
-    add("FOUND_IN_SERP", text=biz.provider)
+    if biz.provider != "cslb":
+        add("FOUND_IN_SERP", text=biz.provider)
     if biz.rank is not None:
         add("SERP_RANK", num=float(biz.rank))
     if biz.has_website is False:

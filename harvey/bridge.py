@@ -45,7 +45,7 @@ BATCH_SIZE = 500
 ACTIVITY_KEEP = 500
 DELETE_CHUNK = 100
 MAX_DISCOVER_SPEND = 5.0
-DISCOVER_PROVIDERS = {"dataforseo_listings", "osm"}
+DISCOVER_PROVIDERS = {"dataforseo_listings", "osm", "cslb"}
 SYNCED_KINDS = ("outbox", "conversation", "prospect", "company", "activity")
 PROTECTED_TOP_LEVEL = {"postal_address", "compliance"}
 
@@ -89,7 +89,8 @@ def _hash(data: dict) -> str:
 
 
 def _name(first: Any, last: Any) -> str:
-    return f"{first or ''} {last or ''}".strip()
+    # A business contact (office@, an owner's gmail) has no personal name.
+    return f"{first or ''} {last or ''}".strip() or "Owner (business address)"
 
 
 # ── Pure helpers ──
@@ -346,6 +347,7 @@ class Bridge:
                 "email_status": r["email_status"] or "", "company_id": r["company_id"],
                 "company_name": r["c_name"] or r["company"] or "",
                 "industry": r["industry"], "status": r["status"], "score": r["score"],
+                "contact_kind": (r["contact_kind"] if "contact_kind" in r.keys() else "") or "person",
                 "personalization_notes": r["personalization_notes"],
                 "created_at": _iso(r["created_at"]), "updated_at": _iso(r["updated_at"]),
             } for r in rows
@@ -626,7 +628,7 @@ class Bridge:
     async def _cmd_run_discover(self, p: dict) -> str:
         provider = p.get("provider")
         if provider not in DISCOVER_PROVIDERS:
-            raise CommandError("Only the DataForSEO listings and OpenStreetMap searches are allowed.")
+            raise CommandError("Only the DataForSEO listings, OpenStreetMap and California contractor-licence (CSLB) searches are allowed.")
         try:
             spend = float(p.get("max_spend"))
         except (TypeError, ValueError):

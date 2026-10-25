@@ -403,6 +403,17 @@ MIGRATIONS: list[str] = [
         SELECT DISTINCT company_id FROM observations WHERE collector = 'profile'
     );
     """,
+    # ── v11: business-address contacts + website-lookup rotation ──
+    """
+    -- 'person' (a named human, the original and default) or 'business' (a
+    -- published business address with no named ICP person behind it: the
+    -- greeting is generic and first/last name are blank).
+    ALTER TABLE prospects ADD COLUMN contact_kind TEXT DEFAULT 'person';
+
+    -- Website-finder rotation: a paid SERP lookup runs at most once per
+    -- company, whether or not it found a site.
+    ALTER TABLE companies ADD COLUMN website_checked_at TIMESTAMP DEFAULT NULL;
+    """,
 ]
 
 # When a company was last profiled: the newer of the explicit check stamp
@@ -633,6 +644,7 @@ class StateManager:
         d["email_verified"] = bool(d.get("email_verified", 0))
         d["phone_verified"] = bool(d.get("phone_verified", 0))
         d["email_status"] = d.get("email_status") or ""
+        d["contact_kind"] = d.get("contact_kind") or "person"
         return Prospect(**d)
 
     async def add_prospect(self, prospect: Prospect) -> str:
@@ -649,8 +661,8 @@ class StateManager:
                     email_status, phone, phone_verified, linkedin_url, title,
                     seniority, department, source, source_url, status, score,
                     personalization_notes, company, industry, company_size,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    contact_kind, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     prospect.id, prospect.company_id,
                     prospect.first_name, prospect.last_name,
@@ -663,6 +675,7 @@ class StateManager:
                     prospect.status, prospect.score,
                     prospect.personalization_notes,
                     prospect.company, prospect.industry, prospect.company_size,
+                    prospect.contact_kind or "person",
                     prospect.created_at.isoformat(),
                     prospect.updated_at.isoformat(),
                 ),
@@ -1256,7 +1269,7 @@ class StateManager:
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                """SELECT c.id, c.name, c.domain, c.industry
+                """SELECT c.id, c.name, c.domain, c.industry, c.source
                    FROM companies c
                    LEFT JOIN prospects p ON p.company_id = c.id
                    WHERE c.domain != ''
@@ -1269,6 +1282,67 @@ class StateManager:
                 (f"-{int(stale_days)} days", int(limit)),
             ) as cursor:
                 return [dict(r) for r in await cursor.fetchall()]
+
+    async def companies_needing_website(
+        self, source: str, limit: int = 100
+    ) -> list[dict]:
+        """Companies from ``source`` with no domain and no website lookup yet.
+
+        The website finder is a paid SERP query, so each company is looked
+        up once: ``website_checked_at`` is stamped on every attempt, found
+        or not, and the next run simply continues with whoever is left.
+        """
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT id, name, location, industry FROM companies
+                   WHERE source = ? AND domain = '' AND website_checked_at IS NULL
+                   ORDER BY created_at, id LIMIT ?""",
+                (source, int(limit)),
+            ) as cursor:
+                return [dict(r) for r in await cursor.fetchall()]
+
+    async def count_companies_needing_website(self, source: str) -> int:
+        async with self._connect() as db:
+            async with db.execute(
+                """SELECT COUNT(*) FROM companies
+                   WHERE source = ? AND domain = '' AND website_checked_at IS NULL""",
+                (source,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+
+    async def set_company_website(
+        self, company_id: str, domain: str = "", website: str = ""
+    ) -> bool:
+        """Record the outcome of a website lookup; True when a domain was set.
+
+        Always stamps ``website_checked_at``. A domain another company
+        already owns (the unique index) is not stolen — the lookup is still
+        marked done.
+        """
+        domain = _norm(domain)
+        async with self._connect() as db:
+            applied = False
+            if domain:
+                async with db.execute(
+                    "SELECT 1 FROM companies WHERE domain = ? AND id != ?",
+                    (domain, company_id),
+                ) as cur:
+                    taken = await cur.fetchone()
+                if not taken:
+                    await db.execute(
+                        "UPDATE companies SET domain = ?, website = ? WHERE id = ?",
+                        (domain, website, company_id),
+                    )
+                    applied = True
+            await db.execute(
+                """UPDATE companies SET website_checked_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                (company_id,),
+            )
+            await db.commit()
+        return applied
 
     async def mark_prospects_checked(self, company_id: str):
         """Record that a prospect-backfill pass looked at this company,
