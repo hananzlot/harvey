@@ -1580,11 +1580,12 @@ Respond ONLY with the JSON array."""
 
         first, last = owner if owner else ("", "")
         title = "Owner"
-        if not owner:
-            named = await self.state.licence_owner_for_company(company_id)
-            if named and named.get("first_name"):
-                first, last = named["first_name"], named.get("last_name", "")
-                title = named.get("title") or "Owner"
+        # The licence board's record of who owns the company beats a name
+        # guessed from website text ("Operating", "Years" were real misses).
+        named = await self.state.licence_owner_for_company(company_id)
+        if named and named.get("first_name"):
+            first, last = named["first_name"], named.get("last_name", "")
+            title = named.get("title") or "Owner"
         prospect = Prospect(
             first_name=first,
             last_name=last,

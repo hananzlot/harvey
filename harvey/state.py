@@ -797,7 +797,8 @@ class StateManager:
                 return dict(row) if row else None
 
     async def name_unnamed_licence_contacts(self) -> int:
-        """Give the owner's name to licensed-company contacts that have none."""
+        """Give the licence owner's name to licensed-company contacts with no
+        name, or whose name was only guessed from website text."""
         async with self._connect() as db:
             cur = await db.execute(
                 """UPDATE prospects SET
@@ -809,7 +810,7 @@ class StateManager:
                                    ON 'cslb:' || o.licence = c.external_id WHERE c.id = prospects.company_id),
                      contact_kind = 'person',
                      updated_at = CURRENT_TIMESTAMP
-                   WHERE first_name = '' AND company_id IN (
+                   WHERE (first_name = '' OR source = 'known_company_backfill') AND company_id IN (
                      SELECT c.id FROM companies c JOIN licence_owners o
                        ON 'cslb:' || o.licence = c.external_id)""")
             await db.commit()
