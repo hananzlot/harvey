@@ -254,3 +254,42 @@ async def test_derive_pattern_spends_and_respects_hunter_budget(state, monkeypat
     _, source, _ = await derive_pattern("second-co.com", state=state)
     assert source == "default"
     assert calls == ["first-co.com"]
+
+
+def _reoon_response(monkeypatch, payload):
+    import httpx
+    import harvey.integrations.email_finder as ef_mod
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k):
+            return httpx.Response(200, json=payload)
+    monkeypatch.setattr(ef_mod.httpx, "AsyncClient", FakeClient)
+    import asyncio
+    return asyncio.run(ef_mod.verify_reoon("office@acme.com", "k"))
+
+
+def test_reoon_power_safe_is_valid(monkeypatch):
+    v = _reoon_response(monkeypatch, {"status": "safe", "is_catch_all": False})
+    assert v == {"status": "valid", "catch_all": False}
+
+
+def test_reoon_deliverable_role_account_is_valid(monkeypatch):
+    v = _reoon_response(monkeypatch, {"status": "role_account", "is_catch_all": False,
+                                       "is_deliverable": True, "is_safe_to_send": True})
+    assert v["status"] == "valid"
+
+
+def test_reoon_undeliverable_role_account_stays_inconclusive(monkeypatch):
+    v = _reoon_response(monkeypatch, {"status": "role_account", "is_catch_all": False,
+                                       "is_deliverable": False, "is_safe_to_send": False})
+    assert v["status"] == "role_account"
+
+
+def test_reoon_catch_all_role_account_stays_risky(monkeypatch):
+    from harvey.integrations.email_finder import _status_from_verdict
+    v = _reoon_response(monkeypatch, {"status": "role_account", "is_catch_all": True,
+                                       "is_deliverable": True, "is_safe_to_send": True})
+    assert _status_from_verdict(v) == "risky"

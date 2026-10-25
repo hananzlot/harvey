@@ -376,6 +376,14 @@ async def verify_reoon(email: str, api_key: str) -> Optional[dict]:
         return None
     status = str(data.get("status") or "").lower()
     is_catch_all = bool(data.get("is_catch_all") or status == "catch_all")
+    # Power mode answers "safe" (not "valid") for a deliverable inbox, and
+    # "role_account" for office@/info@ — which it still marks deliverable and
+    # safe to send. Those are exactly the business addresses Harvey writes to.
+    if not is_catch_all and (
+        status == "safe"
+        or (status == "role_account" and data.get("is_deliverable") and data.get("is_safe_to_send"))
+    ):
+        status = "valid"
     return {"status": status, "catch_all": is_catch_all}
 
 
