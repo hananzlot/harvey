@@ -53,6 +53,7 @@ def pre_send_check(
     prospect=None,
     allow_risky: bool = False,
     kind: str = "sequence",
+    allowed_phrases: tuple[str, ...] | list[str] = (),
 ) -> GateResult:
     """Run every deterministic check. Returns ok=False with reasons on any hit."""
     reasons: list[str] = []
@@ -91,7 +92,10 @@ def pre_send_check(
 
     # Banned phrases (spam triggers + AI tells)
     lowered = (subject + " " + body).lower()
-    hits = [p for p in BANNED_PHRASES if p in lowered]
+    # The owner may approve specific phrases for his own offer (e.g. "double
+    # your" in a revenue guarantee) — config channels.email.allowed_phrases.
+    allowed = {a.strip().lower() for a in allowed_phrases if a and a.strip()}
+    hits = [p for p in BANNED_PHRASES if p in lowered and p not in allowed]
     if hits:
         reasons.append(f"banned phrases: {hits[:3]}")
 

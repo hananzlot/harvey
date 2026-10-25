@@ -539,6 +539,7 @@ class Sender:
             gate = pre_send_check(
                 item["to_email"], item["subject"], item["body"],
                 prospect=prospect, allow_risky=allow_risky, kind=item["kind"],
+                allowed_phrases=getattr(self.config.channels.email, "allowed_phrases", []) or [],
             )
             if not gate:
                 await self.state.update_outbox_item(

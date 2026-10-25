@@ -117,3 +117,14 @@ def test_reply_approval_is_separate_and_on_by_default():
     from harvey.agents import handler
     src = inspect.getsource(handler)
     assert '"require_reply_approval", True' in src
+
+
+def test_owner_allowed_phrase_passes_the_gate_but_others_still_block():
+    from harvey.gate import pre_send_check
+    body = "Hi Bill,\n\nDouble your revenue in 12 months under our guarantee.\n\nChanan"
+    blocked = pre_send_check("bill@acme.com", "Double your revenue", body)
+    assert any("double your" in r for r in blocked.reasons)
+    ok = pre_send_check("bill@acme.com", "Double your revenue", body, allowed_phrases=["double your"])
+    assert not any("banned phrases" in r for r in ok.reasons)
+    still = pre_send_check("bill@acme.com", "Act now", body + " Act now.", allowed_phrases=["double your"])
+    assert any("act now" in r for r in still.reasons)

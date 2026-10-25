@@ -92,6 +92,8 @@ class EmailChannelConfig(BaseModel):
     # Harvey's answers to people who replied. Separate from require_approval
     # (owner 2026-10-25: first emails send on their own, replies wait for him).
     require_reply_approval: bool = True
+    # Phrases from gate.BANNED_PHRASES the owner has approved for his offer.
+    allowed_phrases: list[str] = []
     # Kill switch: pause all sending when bounces exceed this fraction of
     # sent mail (measured over the trailing sends). 0 disables the switch.
     max_bounce_rate: float = 0.05
