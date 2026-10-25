@@ -38,6 +38,8 @@ class Fake:
         self.dash_replies: dict[str, tuple[int, dict]] = {}
         self.upsert_batches: list[int] = []
         self.offline = False
+        self.rpc_calls: list[dict] = []
+        self.rpc_reply = "updated"
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         u = urlparse(str(req.url))
@@ -63,6 +65,10 @@ class Fake:
                 for i in ids:
                     self.records.pop((kind, i), None)
                 return httpx.Response(204)
+        if path == "/rpc/harvey_record_contact_email":
+            body = json.loads(req.content)
+            self.rpc_calls.append(body)
+            return httpx.Response(200, json=self.rpc_reply)
         if path == "/harvey_commands":
             if req.method == "GET":
                 return httpx.Response(200, json=[c for c in self.commands
@@ -451,3 +457,49 @@ def test_dashboard_start_launches_the_run_subcommand():
     import pathlib
     src = pathlib.Path(__file__).resolve().parents[1].joinpath("harvey/dashboard.py").read_text()
     assert '[sys.executable, "-m", "harvey", "run"]' in src
+
+
+# ── HQ contact write-back ──
+
+
+def _seed_cslb(env, status="verified", email="office@acme.com"):
+    env.sql("INSERT INTO companies (id,name,domain,external_id) VALUES "
+            "('cs1','Acme Roofing','acmeroofing.com','cslb:778739')")
+    env.sql("INSERT INTO prospects (id,company_id,first_name,last_name,email,email_status,title,company)"
+            " VALUES ('pc1','cs1','','',?,?,'Owner','Acme Roofing')", email, status)
+
+
+def test_writeback_sends_licence_email_once(env):
+    _seed_cslb(env)
+    assert env.run(env.b.write_back_emails()) == {"updated": 1}
+    assert env.fake.rpc_calls == [{"p_license_number": "778739", "p_email": "office@acme.com",
+                                   "p_email_status": "verified",
+                                   "p_website": "https://acmeroofing.com"}]
+    assert env.run(env.b.write_back_emails()) == {}
+    assert len(env.fake.rpc_calls) == 1
+    assert env.b.hq_emails_copied() == 1
+
+
+def test_writeback_skips_unchecked_and_non_licence_rows(env):
+    env.seed()
+    _seed_cslb(env, status="guess")
+    assert env.run(env.b.write_back_emails()) == {}
+    assert env.fake.rpc_calls == []
+
+
+def test_writeback_resends_when_email_changes_and_counts_results(env):
+    _seed_cslb(env)
+    env.fake.rpc_reply = "kept_existing"
+    assert env.run(env.b.write_back_emails()) == {"kept_existing": 1}
+    assert env.b.hq_emails_copied() == 0
+    env.sql("UPDATE prospects SET email='owner@acme.com' WHERE id='pc1'")
+    env.fake.rpc_reply = "updated"
+    assert env.run(env.b.write_back_emails()) == {"updated": 1}
+    assert env.fake.rpc_calls[-1]["p_email"] == "owner@acme.com"
+
+
+def test_status_reports_hq_emails_copied(env):
+    _seed_cslb(env)
+    env.run(env.b.write_back_emails())
+    env.push()
+    assert env.data("status", "current")["hq_emails_copied"] == 1

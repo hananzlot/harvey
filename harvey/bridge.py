@@ -452,6 +452,7 @@ class Bridge:
             # No explicit cycle marker exists; the newest logged action is the best proxy.
             "last_cycle_at": _iso(self._scalar(
                 conn, "SELECT MAX(created_at) FROM actions", default=None)),
+            "hq_emails_copied": self.hq_emails_copied(),
             "bridge_heartbeat_at": _now_iso(),
             "version": VERSION,
             "host": self.host,
@@ -534,6 +535,59 @@ class Bridge:
                     counts["deleted"] += len(gone)
                     self._save_cache()
         return counts
+
+    # ── HQ contact write-back ──
+
+    WRITEBACK_KEY = "_hq_writeback"
+    WRITEBACK_STATUSES = ("verified", "risky")
+
+    def _writeback_candidates(self) -> list[dict]:
+        """Licensed-contractor prospects with a checked email, one per licence."""
+        sql = (
+            "SELECT c.external_id AS ext, p.email AS email, p.email_status AS status, "
+            "       c.domain AS domain "
+            "  FROM prospects p JOIN companies c ON c.id = p.company_id "
+            " WHERE c.external_id LIKE 'cslb:%' AND p.email != '' "
+            f"   AND p.email_status IN ({','.join('?' * len(self.WRITEBACK_STATUSES))}) "
+            " ORDER BY CASE p.email_status WHEN 'verified' THEN 0 ELSE 1 END, p.created_at"
+        )
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(sql, self.WRITEBACK_STATUSES).fetchall()
+        except sqlite3.Error as e:
+            logger.debug("write-back read failed: %s", e)
+            return []
+        out: dict[str, dict] = {}
+        for r in rows:
+            licence = str(r["ext"]).split(":", 1)[1].strip()
+            if licence and licence not in out:
+                out[licence] = {"licence": licence, "email": r["email"].strip().lower(),
+                                "status": r["status"], "domain": r["domain"] or ""}
+        return list(out.values())
+
+    async def write_back_emails(self) -> dict[str, int]:
+        """Copy each found email onto the iBuildPro HQ contact with that licence
+        number. The database function only fills an EMPTY email, so a value a
+        person typed is never overwritten. Each licence+email is sent once."""
+        done = self._cache.setdefault(self.WRITEBACK_KEY, {})
+        counts: dict[str, int] = {}
+        for c in self._writeback_candidates():
+            if done.get(c["licence"], "").split("|", 1)[0] == c["email"]:
+                continue
+            r = await self._sb_req("POST", "/rpc/harvey_record_contact_email", json={
+                "p_license_number": c["licence"], "p_email": c["email"],
+                "p_email_status": c["status"],
+                "p_website": f"https://{c['domain']}" if c["domain"] else None,
+            })
+            result = str(r.json())
+            done[c["licence"]] = f"{c['email']}|{result}"
+            counts[result] = counts.get(result, 0) + 1
+            self._save_cache()
+        return counts
+
+    def hq_emails_copied(self) -> int:
+        return sum(1 for v in self._cache.get(self.WRITEBACK_KEY, {}).values()
+                   if v.endswith("|updated"))
 
     # ── Commands ──
 
@@ -755,6 +809,9 @@ async def bridge_loop(bridge: Bridge, *, stop: asyncio.Event | None = None,
             if loop.time() >= next_push:
                 counts = await bridge.push_snapshot()
                 logger.info("bridge push: %s", counts)
+                copied = await bridge.write_back_emails()
+                if copied:
+                    logger.info("HQ contact write-back: %s", copied)
                 next_push = loop.time() + snapshot_interval
             failures = 0
             delay = command_interval
