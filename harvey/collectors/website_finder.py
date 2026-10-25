@@ -233,3 +233,26 @@ async def run_lookups(state, client, env: dict, source: str, budget: float,
 def _probe_query():
     from harvey.collectors.discover import DiscoveryQuery
     return DiscoveryQuery(term="x", depth=LOOKUP_DEPTH, limit=LOOKUP_DEPTH)
+
+
+_OTHER_STATE = re.compile(
+    r"\b(Alabama|Alaska|Arizona|Arkansas|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|"
+    r"Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|"
+    r"Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|"
+    r"North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|"
+    r"South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|"
+    r"Ontario|British Columbia|Alberta|Quebec)\b")
+_CALIFORNIA = re.compile(r"\bCalifornia\b|,\s*CA\b|\bCA\s+9\d{4}\b")
+
+
+def site_is_californian(text: str, city: str = "") -> bool:
+    """A licensed California contractor's own site names California (or its
+    city) more often than any other state. 2026-10-25: 'Rain Dance Roofing'
+    matched raindancenc.com, a North Carolina roofer."""
+    plain = re.sub(r"<[^>]+>", " ", text or "")
+    ca = len(_CALIFORNIA.findall(plain))
+    if city and len(city) >= 4:
+        ca += len(re.findall(r"\b" + re.escape(city) + r"\b", plain, re.IGNORECASE))
+    other = len(_OTHER_STATE.findall(plain))
+    return ca > 0 and ca >= other
+

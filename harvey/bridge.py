@@ -551,7 +551,7 @@ class Bridge:
             "  FROM outbox o JOIN prospects p ON p.id = o.prospect_id "
             "  JOIN companies c ON c.id = p.company_id "
             " WHERE o.status = 'sent' AND c.external_id LIKE 'cslb:%' "
-            "   AND p.status NOT IN ('lost', 'customer') "
+            "   AND p.status NOT IN ('lost', 'customer') AND p.source != 'out_of_state_site' "
             " ORDER BY o.sent_at"
         )
         try:
@@ -615,7 +615,7 @@ class Bridge:
             "       c.domain AS domain "
             "  FROM prospects p JOIN companies c ON c.id = p.company_id "
             " WHERE c.external_id LIKE 'cslb:%' AND p.email != '' "
-            "   AND p.status NOT IN ('lost', 'customer') "
+            "   AND p.status NOT IN ('lost', 'customer') AND p.source != 'out_of_state_site' "
             f"   AND p.email_status IN ({','.join('?' * len(self.WRITEBACK_STATUSES))}) "
             " ORDER BY CASE p.email_status WHEN 'verified' THEN 0 ELSE 1 END, p.created_at"
         )

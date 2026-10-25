@@ -765,6 +765,12 @@ class StateManager:
             )
             return [dict(r) for r in await cur.fetchall()]
 
+    async def company_location(self, company_id: str) -> str:
+        async with self._connect() as db:
+            async with db.execute("SELECT location FROM companies WHERE id = ?", (company_id,)) as cur:
+                row = await cur.fetchone()
+                return (row[0] or "") if row else ""
+
     async def licence_numbers(self) -> set[str]:
         """Licence numbers of the licensed-contractor companies on file."""
         async with self._connect() as db:
@@ -810,7 +816,8 @@ class StateManager:
                                    ON 'cslb:' || o.licence = c.external_id WHERE c.id = prospects.company_id),
                      contact_kind = 'person',
                      updated_at = CURRENT_TIMESTAMP
-                   WHERE (first_name = '' OR source = 'known_company_backfill') AND company_id IN (
+                   WHERE (first_name = '' OR source = 'known_company_backfill')
+                     AND source != 'out_of_state_site' AND company_id IN (
                      SELECT c.id FROM companies c JOIN licence_owners o
                        ON 'cslb:' || o.licence = c.external_id)""")
             await db.commit()

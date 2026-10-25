@@ -75,6 +75,8 @@ HUNTER_DOMAINS_PER_CYCLE = 1
 # sources that are verified real contractors: a licence-board list, not the
 # SEO / lead-gen sites that general discovery also turns up.
 BUSINESS_CONTACT_SOURCES = ("discover:cslb",)
+# A contact whose website is a same-named business outside California.
+OUT_OF_STATE_SOURCE = "out_of_state_site"
 # Pages a small contractor site publishes its contact details on.
 BUSINESS_PAGES = ("", "/contact", "/contact-us", "/about", "/about-us")
 
@@ -1466,7 +1468,9 @@ Respond ONLY with the JSON array."""
         to its published business address (see ``_business_contact``).
         """
         try:
-            team_members = await self._scrape_team_page(domain)
+            # Licensed companies get their name from the licence record and go
+            # through _business_contact's state check; team pages are skipped.
+            team_members = [] if business_fallback else await self._scrape_team_page(domain)
         except Exception as e:
             logger.debug(f"Team scrape failed for {domain}: {e}")
             team_members = []
@@ -1564,6 +1568,15 @@ Respond ONLY with the JSON array."""
                 if addr not in emails:
                     emails.append(addr)
 
+        from harvey.collectors.website_finder import city_of, site_is_californian
+        location = await self.state.company_location(company_id)
+        # A site in another US state is still worth emailing (iBuildPro sells
+        # US-wide), but it is not the California licensee we looked up, so it
+        # must not borrow that licence's owner name, HQ contact or lead.
+        in_state = site_is_californian(" ".join(texts), city_of(location))
+        if not in_state:
+            logger.info(f"Scout: {domain} is not the California licensee; emailed as its own business.")
+
         ranked = rank_business_emails(emails, domain, company_name)
         owner = find_owner_name(" ".join(texts))
         if not ranked and not owner:
@@ -1582,7 +1595,7 @@ Respond ONLY with the JSON array."""
         title = "Owner"
         # The licence board's record of who owns the company beats a name
         # guessed from website text ("Operating", "Years" were real misses).
-        named = await self.state.licence_owner_for_company(company_id)
+        named = await self.state.licence_owner_for_company(company_id) if in_state else None
         if named and named.get("first_name"):
             first, last = named["first_name"], named.get("last_name", "")
             title = named.get("title") or "Owner"
@@ -1597,7 +1610,7 @@ Respond ONLY with the JSON array."""
             title=title,
             seniority="c_suite",
             industry=industry,
-            source=source,
+            source=source if in_state else OUT_OF_STATE_SOURCE,
             source_url=f"https://{domain}",
             personalization_notes=signal_note,
             contact_kind="person" if first else "business",

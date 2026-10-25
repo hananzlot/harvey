@@ -128,3 +128,12 @@ def test_owner_allowed_phrase_passes_the_gate_but_others_still_block():
     assert not any("banned phrases" in r for r in ok.reasons)
     still = pre_send_check("bill@acme.com", "Act now", body + " Act now.", allowed_phrases=["double your"])
     assert any("act now" in r for r in still.reasons)
+
+
+def test_site_state_check():
+    from harvey.collectors.website_finder import site_is_californian
+    assert site_is_californian("Serving Los Angeles, CA 90026 since 1990")
+    assert site_is_californian("Proudly serving the Inland Empire", "Riverside") is False
+    assert site_is_californian("Roofing in Riverside and Corona", "Riverside")
+    assert not site_is_californian("Raleigh, North Carolina roofing experts. Call us in NC.")
+    assert not site_is_californian("")
