@@ -172,10 +172,22 @@ class GmailProvider(MailProvider):
             thread_ref=data.get("threadId", ""),
         )
 
+    def _reply_query(self) -> str:
+        """Only mail addressed to the sending persona, plus bounce notices.
+
+        The persona address may be an alias on a personal mailbox; without
+        this filter Harvey would open every message in that inbox.
+        """
+        base = "in:inbox -from:me newer_than:7d"
+        address = (self.config.persona.email or "").strip()
+        if not address:
+            return base
+        return f"{base} {{to:{address} from:mailer-daemon from:postmaster}}"
+
     async def get_replies(self, limit: int = 50) -> list[InboundMessage]:
         listing = await self._request(
             "GET", "/messages",
-            params={"q": "in:inbox -from:me newer_than:7d", "maxResults": limit},
+            params={"q": self._reply_query(), "maxResults": limit},
         )
         if not listing:
             return []
