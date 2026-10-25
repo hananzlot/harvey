@@ -53,6 +53,7 @@ GENERIC_NAME_WORDS = frozenset({
     "remodeling", "repair", "repairs", "installation", "installers",
     "installer", "electric", "electrical", "pro", "pros", "professional",
     "professionals", "usa", "california", "socal", "southern", "county",
+    "commercial", "residential", "ca", "oc", "gutters", "gutter", "raingutters",
 })
 
 
@@ -89,37 +90,35 @@ def _squash(s: str) -> str:
 
 
 def plausible_match(name: str, domain: str, title: str = "") -> bool:
-    """Does this result look like the business called ``name``?
+    """Does this domain belong to the business called ``name``?
 
-    Any of: a distinctive name word (3+ letters) inside the domain; the
-    squashed distinctive name close to the domain label (handles "A-1" and
-    "F D L"); or at least half of the distinctive words in the page title.
+    Strict on purpose (2026-10-25: the looser version — page-title words,
+    fuzzy similarity, words anywhere in a subdomain — matched gaf.com,
+    theglobeandmail.com, usphonebook.com and a lead-gen subdomain to licensed
+    roofers, and their emails went out as contacts). Only the registered name
+    (the label before the TLD; never a subdomain) counts, and it must hold:
+    every distinctive word of 3+ letters; or, for names with 3+ such words,
+    the first one plus at least one more; or, when the name has no distinctive
+    word that long ("J J Roofing", "K R Construction"), the squashed letters as
+    its start. ``title`` is accepted for compatibility and ignored.
     """
-    toks = name_tokens(name)
-    if not toks:
+    labels = [p for p in (domain or "").lower().split(".") if p]
+    if len(labels) < 2:
         return False
-    label = _squash(domain.split(".")[0] if domain.count(".") < 2
-                    else ".".join(domain.split(".")[:-1]))
+    label = _squash(labels[-2])
+    if len(labels) >= 3 and len(labels[-1]) == 2 and len(labels[-2]) <= 3:
+        label = _squash(labels[-3])      # "acme.co.uk" style
     if not label:
         return False
-    if any(len(t) >= 3 and t in label for t in toks):
-        return True
-    squashed = "".join(toks)
-    if len(squashed) >= 2 and label.startswith(squashed):
-        return True                      # "A-1 Roofing" -> a1roofing.com
-    if len(squashed) >= 3 and (
-            squashed in label
-            or (len(label) >= 3 and label in squashed and len(label) >= 0.6 * len(squashed))
-            or difflib.SequenceMatcher(None, squashed, label).ratio() >= 0.75):
-        return True
-    title_words = set(re.findall(r"[a-z0-9]+", (title or "").lower()))
-    sig = [t for t in toks if len(t) >= 2 or t.isdigit()]
-    if sig:
-        hit = sum(1 for t in sig if t in title_words)
-        if hit >= max(1, -(-len(sig) // 2)) and hit >= 1 and (
-                len(sig) > 1 or len(sig[0]) >= 3):
+    toks = name_tokens(name)
+    long_toks = [t for t in toks if len(t) >= 3]
+    if long_toks:
+        hits = [t for t in long_toks if t in label]
+        if len(hits) == len(long_toks):
             return True
-    return False
+        return len(long_toks) >= 3 and long_toks[0] in hits and len(hits) >= 2
+    squashed = "".join(toks)
+    return len(squashed) >= 2 and label.startswith(squashed)
 
 
 def pick_website(name: str, results) -> tuple[str, str] | None:

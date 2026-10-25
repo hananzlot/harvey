@@ -200,11 +200,23 @@ def test_no_plausible_match_returns_none():
     assert W.pick_website("Rainbow Construction Group", results) is None
 
 
-def test_name_match_by_title_and_squashed_label():
+def test_name_match_uses_the_registered_domain_only():
     assert W.plausible_match("F D L Roofing Inc", "fdlroofing.com")
     assert W.plausible_match("A-1 Roofing", "a1roofing.com")
-    assert W.plausible_match("Sunny Side Solar LLC", "pvexperts.com", "Sunny Side Solar | San Diego")
-    assert not W.plausible_match("Sunny Side Solar LLC", "pvexperts.com", "PV Experts")
+    assert W.plausible_match("Tecta America Southern California Inc", "tectaamerica.com")
+    assert W.plausible_match("Top Choice Roof Tearoff Inc", "topchoiceimprovements.com")
+    assert W.plausible_match("Escamilla'S Roofing & Raingutters Inc", "escamillasroofing.com")
+    # A page title naming the business no longer counts (a news article or a
+    # directory page titles itself with the business name).
+    assert not W.plausible_match("Sunny Side Solar LLC", "pvexperts.com", "Sunny Side Solar | San Diego")
+    # The real misses of 2026-10-25.
+    for name, domain in [("Lemus Roofing", "gaf.com"), ("Marino Bill", "theglobeandmail.com"),
+                         ("Myers William Christopher", "usphonebook.com"),
+                         ("Lomeli'S Roofing", "zerofi.ai"), ("Starr Roofing", "experience.com"),
+                         ("Cardiff By The Sea Roofing Inc", "cardiff-by-the-sea-ca.proaccessroofing.com"),
+                         ("Over All Roofing Inc", "overandaboveroofingoc.com"),
+                         ("San Marino Roof Co Inc", "birchbarkroofing.com")]:
+        assert not W.plausible_match(name, domain), (name, domain)
 
 
 def test_city_of():
