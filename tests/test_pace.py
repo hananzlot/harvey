@@ -95,3 +95,15 @@ def test_recheck_off_by_default(tmp_path):
     state = StateManager(str(tmp_path / "h.db"))
     asyncio.run(state.init_db())
     assert asyncio.run(_scout(state, UsageConfig())._recheck_unconfirmed()) == 0
+
+
+def test_team_greeting_cleans_company_names():
+    from harvey.models.prospect import team_greeting, Prospect
+    assert team_greeting("TOP CHOICE ROOF TEAROFF INC") == "Top Choice Roof Tearoff team"
+    assert team_greeting("Escamilla'S Roofing & Raingutters Inc") == "Escamilla's Roofing & Raingutters team"
+    assert team_greeting("Celoseal Roofing, LLC") == "Celoseal Roofing team"
+    assert team_greeting("") == ""
+    p = Prospect(first_name="", last_name="", title="Owner", company="Acme Roofing Inc",
+                 contact_kind="business", email="office@acme.com")
+    assert p.greeting_name() == "Acme Roofing team"
+    assert Prospect(first_name="Todd", last_name="Young", title="Owner").greeting_name() == "Todd"

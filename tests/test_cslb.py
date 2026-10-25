@@ -461,9 +461,9 @@ def test_greeting_renders_naturally_for_a_business_contact():
     sender = Sender.__new__(Sender)
     p = business()
     assert sender._render("Hi {{first_name}},\n\nQuick one for {{company}}.", p) == \
-        "Hi there,\n\nQuick one for Acme Roofing."
-    assert sender._render("{{first_name}}, quick follow up", p) == "Hi there, quick follow up"
-    assert sender._render("Hi {{ first_name }},", p) == "Hi there,"
+        "Hi Acme Roofing team,\n\nQuick one for Acme Roofing."
+    assert sender._render("{{first_name}}, quick follow up", p) == "Hi Acme Roofing team, quick follow up"
+    assert sender._render("Hi {{ first_name }},", p) == "Hi Acme Roofing team,"
     # a named person is unchanged
     named = Prospect(first_name="Todd", last_name="Young", title="Owner", company="Acme")
     assert sender._render("Hi {{first_name}},", named) == "Hi Todd,"

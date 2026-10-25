@@ -226,9 +226,8 @@ class Writer:
 
         business_rule = (
             "- This goes to the business's published address and no personal name is "
-            "known. Open with \"Hi there,\" and address the owner of "
-            f"{prospect.company} naturally (for example \"I'm writing to whoever runs "
-            f"{prospect.company}\"). Never invent a name, never write a placeholder "
+            f"known. Open with \"Hi {prospect.greeting_name()},\" (never \"Hi there\") and address the owner of "
+            f"{prospect.company} naturally. Never invent a name, never write a placeholder "
             "like [Name] or {{first_name}}.\n"
             if business else ""
         )
@@ -310,7 +309,7 @@ Requirements:
 - Email 3: Break-up email 4 days after that. Under 40 words. Gracious, not guilt-tripping.
 - Use {{{{first_name}}}}, {{{{company}}}}, {{{{title}}}} as merge variables — every email
   must use at least one. Some contacts are a business's published address with no
-  personal name; for them {{{{first_name}}}} renders as "there" ("Hi there,"), so always
+  personal name; for them {{{{first_name}}}} renders as "<Company> team" ("Hi Acme Roofing team,"), so always
   open "Hi {{{{first_name}}}}," and never put the tag mid-sentence, and email 1 must reference something specific to
   these prospects' industry or role (use the notes above).
 - Never be pushy or salesy. Be consultative and value-driven.

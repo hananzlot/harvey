@@ -654,6 +654,10 @@ class StateManager:
             prospect.id = _new_id()
         prospect.email = _norm(prospect.email)
         prospect.linkedin_url = (prospect.linkedin_url or "").strip()
+        # Never prospect an existing iBuildPro customer (harvey/suppression.py).
+        from harvey.suppression import CUSTOMER_STATUS, is_customer
+        if prospect.email and is_customer(prospect.email):
+            prospect.status = CUSTOMER_STATUS
         async with self._connect() as db:
             cursor = await db.execute(
                 """INSERT OR IGNORE INTO prospects

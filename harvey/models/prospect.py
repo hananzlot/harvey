@@ -1,5 +1,7 @@
 """Contact data model — a person at a company."""
 
+import re
+
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
@@ -65,8 +67,9 @@ class Prospect(BaseModel):
         return f"{self.title or 'Owner'} of {self.company}" if self.company else (self.title or "Owner")
 
     def greeting_name(self) -> str:
-        """What {{first_name}} renders as: the first name, or "there"."""
-        return self.first_name.strip() or "there"
+        """What {{first_name}} renders as: the first name, else "<Company> team"
+        (owner 2026-10-25: never "Hi there"), else "there" with no company."""
+        return self.first_name.strip() or team_greeting(self.company) or "there"
 
     def is_valid(self) -> bool:
         """A person needs a name and title. A business contact (a published
@@ -75,3 +78,23 @@ class Prospect(BaseModel):
         if self.is_business():
             return bool(self.title and (self.company or self.company_id) and self.email)
         return bool(self.first_name and self.last_name and self.title)
+
+
+_COMPANY_SUFFIX = re.compile(
+    r"[\s,.]+(inc|incorporated|llc|l\.l\.c|corp|corporation|co|company|ltd|lp|llp|pc)\.?$",
+    re.IGNORECASE,
+)
+
+
+def team_greeting(company: str) -> str:
+    """'TOP CHOICE ROOF TEAROFF INC' / "Escamilla'S Roofing Inc" -> 'Top Choice Roof Tearoff team'."""
+    name = " ".join((company or "").split())
+    if not name:
+        return ""
+    for _ in range(2):
+        name = _COMPANY_SUFFIX.sub("", name).strip(" ,.")
+    if name.isupper() or name.islower():
+        name = name.title()
+    name = re.sub(r"'S\b", "'s", name)
+    return f"{name} team" if name else ""
+

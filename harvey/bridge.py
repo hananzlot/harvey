@@ -46,6 +46,7 @@ ACTIVITY_KEEP = 500
 DELETE_CHUNK = 100
 MAX_DISCOVER_SPEND = 5.0
 DISCOVER_PROVIDERS = {"dataforseo_listings", "osm", "cslb"}
+SUPPRESSION_INTERVAL = 30 * 60
 SYNCED_KINDS = ("outbox", "conversation", "prospect", "company", "activity")
 PROTECTED_TOP_LEVEL = {"postal_address", "compliance"}
 
@@ -536,6 +537,23 @@ class Bridge:
                     self._save_cache()
         return counts
 
+    # ── Existing-customer list ──
+
+    async def refresh_suppression(self, path=None) -> dict[str, int]:
+        """Pull every existing iBuildPro customer's emails and business domains
+        (RPC harvey_customer_suppression) for harvey/suppression.py. Replaced
+        only on a successful, non-empty answer, so a failed call never wipes
+        the list Harvey is checking against."""
+        from harvey import suppression
+        r = await self._sb_req("POST", "/rpc/harvey_customer_suppression", json={})
+        rows = r.json() if isinstance(r.json(), list) else []
+        emails = [x["value"] for x in rows if x.get("kind") == "email" and x.get("value")]
+        domains = [x["value"] for x in rows if x.get("kind") == "domain" and x.get("value")]
+        if not emails and not domains:
+            raise RuntimeError("customer list came back empty; keeping the previous one")
+        suppression.write_list(emails, domains, **({"path": path} if path else {}))
+        return {"emails": len(set(emails)), "domains": len(set(domains))}
+
     # ── HQ contact write-back ──
 
     WRITEBACK_KEY = "_hq_writeback"
@@ -801,11 +819,19 @@ async def bridge_loop(bridge: Bridge, *, stop: asyncio.Event | None = None,
                       snapshot_interval: float = SNAPSHOT_INTERVAL):
     stop = stop or asyncio.Event()
     next_push = 0.0
+    next_suppression = 0.0
     failures = 0
     loop = asyncio.get_running_loop()
     while not stop.is_set():
         try:
             await bridge.drain_commands()
+            if loop.time() >= next_suppression:
+                try:
+                    logger.info("customer list: %s", await bridge.refresh_suppression())
+                    next_suppression = loop.time() + SUPPRESSION_INTERVAL
+                except Exception as e:
+                    logger.warning("customer list refresh failed: %s", e)
+                    next_suppression = loop.time() + 300
             if loop.time() >= next_push:
                 counts = await bridge.push_snapshot()
                 logger.info("bridge push: %s", counts)

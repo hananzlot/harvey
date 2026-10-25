@@ -31,7 +31,9 @@ MAX_SENDS_PER_CYCLE = 8
 SEND_JITTER_SECONDS = (4, 15)
 
 # Prospect pipeline statuses that mean "stop emailing this person".
-STOP_STATUSES = {"replied", "opted_out", "lost", "meeting", "closed"}
+STOP_STATUSES = {"replied", "opted_out", "lost", "meeting", "closed", "customer"}
+# The customer list must be fresh before anything sends (fail closed).
+SUPPRESSION_MAX_AGE_HOURS = 48
 
 KILL_SWITCH_KEY = "sending_paused"
 BOUNCE_COUNT_KEY = "bounce_count"
@@ -335,6 +337,8 @@ class Sender:
             )
             return
 
+        await self._suppress_customers()
+
         for campaign in await self.state.get_campaigns_by_status("draft"):
             try:
                 await self._stage_campaign_native(campaign)
@@ -342,6 +346,35 @@ class Sender:
                 logger.error(f"Sender: staging '{campaign.name}' failed: {e}")
 
         await self._drain_due()
+
+    async def _suppress_customers(self) -> int:
+        """Retire any contact who turns out to be an iBuildPro customer:
+        status 'customer' and every unsent email for them cancelled."""
+        from harvey.suppression import CUSTOMER_STATUS, is_customer
+        n = 0
+        for status in ("new", "queued", "contacted"):
+            for prospect in await self.state.get_prospects_by_status(status):
+                if prospect.email and is_customer(prospect.email):
+                    await self.state.update_prospect_status(prospect.id, CUSTOMER_STATUS)
+                    await self.state.cancel_pending_outbox_for_prospect(
+                        prospect.id, reason="existing iBuildPro customer")
+                    n += 1
+        if n:
+            logger.info(f"Sender: {n} contact(s) are existing iBuildPro customers — never emailed.")
+        return n
+
+    @staticmethod
+    def _suppression_problem() -> str:
+        """'' when the customer list is present and fresh, else why not."""
+        import time
+        from harvey.suppression import SUPPRESSION_PATH
+        try:
+            age_h = (time.time() - SUPPRESSION_PATH.stat().st_mtime) / 3600
+        except OSError:
+            return "the iBuildPro customer list has not been downloaded yet"
+        if age_h > SUPPRESSION_MAX_AGE_HOURS:
+            return f"the iBuildPro customer list is {int(age_h)} hours old"
+        return ""
 
     def _render(self, text: str, prospect) -> str:
         """Fill merge variables. The pre-send gate rejects any leftovers."""
@@ -363,16 +396,17 @@ class Sender:
         """Natural greeting when there is no personal name to merge.
 
         A business contact (office@, an owner's gmail, no named person) has an
-        empty first name. ``{{first_name}}`` becomes "there": "Hi {{first_name}},"
-        -> "Hi there,", and a line that opens with the bare tag gets a "Hi "
+        empty first name. ``{{first_name}}`` becomes "<Company> team": "Hi {{first_name}},"
+        -> "Hi Acme Roofing team,", and a line that opens with the bare tag gets a "Hi "
         so it never starts "there, ...". Real unrendered tags are untouched
         (the pre-send gate still blocks them).
         """
         if (getattr(prospect, "first_name", "") or "").strip():
             return text
         tag = r"\{\{\s*first_name\s*\}\}"
-        text = re.sub(r"(?m)^(\s*)" + tag, r"\1Hi there", text)
-        return re.sub(tag, "there", text)
+        name = prospect.greeting_name() if hasattr(prospect, "greeting_name") else "there"
+        text = re.sub(r"(?m)^(\s*)" + tag, lambda m: m.group(1) + "Hi " + name, text)
+        return re.sub(tag, lambda _m: name, text)
 
     async def _stage_campaign_native(self, campaign):
         """Render + schedule a draft campaign's emails into the outbox."""
@@ -488,6 +522,16 @@ class Sender:
                     item["id"], status="cancelled",
                     error=f"prospect status '{prospect.status}'",
                 )
+                continue
+
+            from harvey.suppression import is_customer
+            problem = self._suppression_problem()
+            if problem:
+                logger.warning(f"Sender: not sending — {problem}.")
+                return
+            if is_customer(item["to_email"]):
+                await self.state.update_outbox_item(
+                    item["id"], status="cancelled", error="existing iBuildPro customer")
                 continue
 
             gate = pre_send_check(
