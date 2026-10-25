@@ -1013,3 +1013,32 @@ def provider_menu(env: dict | None = None) -> list[dict]:
         }
         for p in PROVIDERS.values()
     ]
+
+
+DAILY_LOOKUP_SETTING = "daily_website_lookup_date"
+
+
+async def daily_website_lookups(state, budget: float, today: str) -> dict:
+    """Once a day: paid website lookups for licensed companies, within ``budget``.
+
+    The daily supply of new contacts (owner 2026-10-25): the scout then reads
+    the sites it finds and confirms the emails. Skipped when already run today,
+    when discovery is paused, or with no budget.
+    """
+    from harvey.collectors.website_finder import run_lookups
+    from harvey.config import load_env
+
+    if budget <= 0 or await state.get_setting(DAILY_LOOKUP_SETTING) == today:
+        return {"skipped": True}
+    if await state.get_setting("discovery_paused"):
+        return {"skipped": True, "stopped": "paused"}
+    await state.set_setting(DAILY_LOOKUP_SETTING, today)
+    env = load_env().model_dump()
+
+    async def paused():
+        return bool(await state.get_setting("discovery_paused"))
+
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+        return await run_lookups(state, client, env, "discover:cslb", budget=budget,
+                                 pause_check=paused)
+

@@ -150,3 +150,20 @@ def test_states_targeting_plans_statewide_california_and_nothing_elsewhere():
     assert sum(len(x.counties) for x in q if x.category == "C-39") == 58
     icp.states = ["Texas"]
     assert build_cslb_queries(SimpleNamespace(icp=icp)) == []
+
+
+def test_daily_website_lookups_run_once_a_day(tmp_path, monkeypatch):
+    from harvey.collectors import discover, website_finder
+    state = StateManager(str(tmp_path / "h.db"))
+    asyncio.run(state.init_db())
+    calls = []
+
+    async def fake_run(state_, client, env, source, budget, limit=5000, pause_check=None):
+        calls.append((source, budget))
+        return {"looked_up": 3, "found": 1, "cost": 0.01, "stopped": ""}
+    monkeypatch.setattr(website_finder, "run_lookups", fake_run)
+    monkeypatch.setattr("harvey.config.load_env", lambda: SimpleNamespace(model_dump=lambda: {}))
+    assert asyncio.run(discover.daily_website_lookups(state, 3.0, "2026-10-26"))["found"] == 1
+    assert asyncio.run(discover.daily_website_lookups(state, 3.0, "2026-10-26")) == {"skipped": True}
+    assert calls == [("discover:cslb", 3.0)]
+    assert asyncio.run(discover.daily_website_lookups(state, 0, "2026-10-27")) == {"skipped": True}

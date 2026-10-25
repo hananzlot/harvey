@@ -161,6 +161,9 @@ class UsageConfig(BaseModel):
     # Unconfirmed ('guess') emails re-checked once a day, when the free
     # verifier credits renew.
     daily_rechecks: int = 0
+    # Dollars per day for automatic website lookups (the daily supply of new
+    # contacts). 0 = off: lookups only run with `harvey discover`.
+    daily_lookup_budget: float = 0.0
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
 
     @field_validator("max_daily_claude_percent")

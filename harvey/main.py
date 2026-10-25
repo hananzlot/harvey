@@ -195,6 +195,21 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
                     break
                 continue
 
+            # 2b. Daily supply of new contacts: website lookups once a day.
+            lookup_budget = float(getattr(config.usage, "daily_lookup_budget", 0) or 0)
+            if lookup_budget > 0:
+                from harvey.collectors.discover import daily_website_lookups
+                try:
+                    res = await daily_website_lookups(
+                        state, lookup_budget, datetime.now().date().isoformat())
+                    if not res.get("skipped"):
+                        logger.info(
+                            f"Daily lookups: {res.get('looked_up', 0)} looked up, "
+                            f"{res.get('found', 0)} websites found, ${res.get('cost', 0):.2f}"
+                            + (f" ({res['stopped']})" if res.get("stopped") else ""))
+                except Exception as e:
+                    logger.warning(f"Daily website lookups failed: {e}")
+
             # 3. Decide what to do
             logger.info("Checking pipeline state...")
             summary = await state.get_state_summary()
