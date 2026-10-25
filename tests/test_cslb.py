@@ -215,7 +215,8 @@ def test_name_match_uses_the_registered_domain_only():
                          ("Lomeli'S Roofing", "zerofi.ai"), ("Starr Roofing", "experience.com"),
                          ("Cardiff By The Sea Roofing Inc", "cardiff-by-the-sea-ca.proaccessroofing.com"),
                          ("Over All Roofing Inc", "overandaboveroofingoc.com"),
-                         ("San Marino Roof Co Inc", "birchbarkroofing.com")]:
+                         ("San Marino Roof Co Inc", "birchbarkroofing.com"),
+                         ("Mega Roofing Inc", "gtamegaroofing.ca")]:
         assert not W.plausible_match(name, domain), (name, domain)
 
 

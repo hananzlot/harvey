@@ -89,6 +89,9 @@ def _squash(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+US_FRIENDLY_CC = frozenset({"us", "co", "io", "ai", "me", "tv"})
+
+
 def plausible_match(name: str, domain: str, title: str = "") -> bool:
     """Does this domain belong to the business called ``name``?
 
@@ -104,6 +107,10 @@ def plausible_match(name: str, domain: str, title: str = "") -> bool:
     """
     labels = [p for p in (domain or "").lower().split(".") if p]
     if len(labels) < 2:
+        return False
+    # California licensees: a two-letter country ending other than .us
+    # (gtamegaroofing.ca, a Toronto roofer, matched "Mega Roofing Inc").
+    if len(labels[-1]) == 2 and labels[-1] not in US_FRIENDLY_CC:
         return False
     label = _squash(labels[-2])
     if len(labels) >= 3 and len(labels[-1]) == 2 and len(labels[-2]) <= 3:
