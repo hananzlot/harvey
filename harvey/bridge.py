@@ -129,6 +129,9 @@ def translate_patch(patch: dict) -> dict:
             p = deep_merge(p, {"channels": {"email": email}})
         if "quiet_hours" in sending:
             p = deep_merge(p, {"usage": {"quiet_hours": sending["quiet_hours"]}})
+        ramp = {k: sending[k] for k in ("ramp_step", "ramp_max") if k in sending}
+        if ramp:
+            p = deep_merge(p, {"usage": ramp})
     return p
 
 
@@ -444,6 +447,7 @@ class Bridge:
             "quiet_hours": ({"start": qh.start, "end": qh.end, "timezone": qh.timezone}
                             if qh else None),
             "in_quiet_hours": _in_quiet_hours(qh.start, qh.end, qh.timezone) if qh else False,
+            "ramp_held": self._setting(conn, "ramp_held"),
             "claude_calls_today": self._scalar(
                 conn, "SELECT claude_calls FROM usage_log WHERE date = date('now')"),
             "bounce_count": bounces,
@@ -483,7 +487,9 @@ class Bridge:
             "sending": {"max_daily_sends": cfg.channels.email.max_daily_sends,
                         "require_approval": cfg.channels.email.require_approval,
                         "quiet_hours": {"start": qh.start, "end": qh.end,
-                                        "timezone": qh.timezone}},
+                                        "timezone": qh.timezone},
+                        "ramp_step": int(getattr(cfg.usage, "ramp_step", 0) or 0),
+                        "ramp_max": int(getattr(cfg.usage, "ramp_max", 0) or 0)},
             "guidance": cfg.guidance,
             "postal_address": cfg.compliance.postal_address,
         }

@@ -532,3 +532,9 @@ def test_record_leads_skips_lost_contacts(env):
     env.sql("INSERT INTO outbox (id,prospect_id,to_email,subject,body,status,step,sent_at,message_id) VALUES "
             "('ox1','pc1','office@acme.com','s','b','sent',1,'2026-10-25 22:05:32','<m1@x>')")
     assert env.run(env.b.record_leads()) == {}
+
+
+def test_translate_patch_maps_ramp_to_usage():
+    from harvey.bridge import translate_patch
+    out = translate_patch({"sending": {"ramp_step": 10, "ramp_max": 50, "max_daily_sends": 15}})
+    assert out == {"channels": {"email": {"max_daily_sends": 15}}, "usage": {"ramp_step": 10, "ramp_max": 50}}
