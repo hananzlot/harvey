@@ -195,6 +195,16 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
                     break
                 continue
 
+            # 2a. Daily send-limit ramp.
+            if getattr(config.usage, "ramp_step", 0):
+                from harvey.ramp import daily_ramp
+                try:
+                    r = await daily_ramp(state, config, datetime.now().date().isoformat())
+                    if r.get("raised") or r.get("held"):
+                        logger.info(f"Send-limit ramp: {r}")
+                except Exception as e:
+                    logger.warning(f"Send-limit ramp failed: {e}")
+
             # 2b. Daily supply of new contacts: website lookups once a day.
             lookup_budget = float(getattr(config.usage, "daily_lookup_budget", 0) or 0)
             if lookup_budget > 0:

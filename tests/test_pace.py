@@ -167,3 +167,36 @@ def test_daily_website_lookups_run_once_a_day(tmp_path, monkeypatch):
     assert asyncio.run(discover.daily_website_lookups(state, 3.0, "2026-10-26")) == {"skipped": True}
     assert calls == [("discover:cslb", 3.0)]
     assert asyncio.run(discover.daily_website_lookups(state, 0, "2026-10-27")) == {"skipped": True}
+
+
+def _ramp_cfg(cap=15, step=10, top=50):
+    return SimpleNamespace(usage=SimpleNamespace(ramp_step=step, ramp_max=top, ramp_max_bounce_rate=0.02),
+                           channels=SimpleNamespace(email=SimpleNamespace(max_daily_sends=cap)))
+
+
+def test_ramp_raises_once_a_day_and_stops_at_max(tmp_path):
+    from harvey.ramp import daily_ramp
+    import yaml
+    state = StateManager(str(tmp_path / "h.db")); asyncio.run(state.init_db())
+    path = tmp_path / "harvey.local.yaml"; path.write_text(yaml.safe_dump({"channels": {"email": {"max_daily_sends": 15}}}))
+    cfg = _ramp_cfg()
+    assert asyncio.run(daily_ramp(state, cfg, "2026-10-26", path)) == {"raised": [15, 25]}
+    assert yaml.safe_load(path.read_text())["channels"]["email"]["max_daily_sends"] == 25
+    assert asyncio.run(daily_ramp(state, cfg, "2026-10-26", path))["skipped"] == "already today"
+    for day in ("27", "28", "29"):
+        asyncio.run(daily_ramp(state, cfg, f"2026-10-{day}", path))
+    assert cfg.channels.email.max_daily_sends == 50
+
+
+def test_ramp_holds_on_bounces(tmp_path):
+    from harvey.ramp import daily_ramp
+    import yaml, sqlite3
+    state = StateManager(str(tmp_path / "h.db")); asyncio.run(state.init_db())
+    c = sqlite3.connect(tmp_path / "h.db")
+    for i in range(20):
+        c.execute("INSERT INTO outbox (id,to_email,subject,body,status) VALUES (?,?,?,?,'sent')", (f"o{i}", "a@b.co", "s", "b"))
+    c.commit(); c.close()
+    asyncio.run(state.set_setting("bounce_count", "1"))
+    path = tmp_path / "harvey.local.yaml"; path.write_text(yaml.safe_dump({"channels": {"email": {"max_daily_sends": 15}}}))
+    r = asyncio.run(daily_ramp(state, _ramp_cfg(), "2026-10-26", path))
+    assert "held" in r and r["limit"] == 15

@@ -164,6 +164,11 @@ class UsageConfig(BaseModel):
     # Dollars per day for automatic website lookups (the daily supply of new
     # contacts). 0 = off: lookups only run with `harvey discover`.
     daily_lookup_budget: float = 0.0
+    # Daily send-limit ramp: +ramp_step a day up to ramp_max while the bounce
+    # rate stays under ramp_max_bounce_rate and nobody complained. 0 = off.
+    ramp_step: int = 0
+    ramp_max: int = 0
+    ramp_max_bounce_rate: float = 0.02
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
 
     @field_validator("max_daily_claude_percent")
