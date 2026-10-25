@@ -89,6 +89,9 @@ class EmailChannelConfig(BaseModel):
     # outbox for your approval (dashboard → Outbox, or `harvey outbox`).
     # Set false for full autopilot once you trust the output.
     require_approval: bool = True
+    # Harvey's answers to people who replied. Separate from require_approval
+    # (owner 2026-10-25: first emails send on their own, replies wait for him).
+    require_reply_approval: bool = True
     # Kill switch: pause all sending when bounces exceed this fraction of
     # sent mail (measured over the trailing sends). 0 disables the switch.
     max_bounce_rate: float = 0.05

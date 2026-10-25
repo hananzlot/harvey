@@ -450,7 +450,7 @@ class Handler:
     ):
         """Route Harvey's reply through the outbox (approval ladder applies)."""
         require_approval = getattr(
-            self.config.channels.email, "require_approval", True
+            self.config.channels.email, "require_reply_approval", True
         )
         subject = reply_meta.get("subject", "")
         if subject and not subject.lower().startswith("re:"):

@@ -107,3 +107,13 @@ def test_team_greeting_cleans_company_names():
                  contact_kind="business", email="office@acme.com")
     assert p.greeting_name() == "Acme Roofing team"
     assert Prospect(first_name="Todd", last_name="Young", title="Owner").greeting_name() == "Todd"
+
+
+def test_reply_approval_is_separate_and_on_by_default():
+    from harvey.config import EmailChannelConfig
+    c = EmailChannelConfig(require_approval=False)
+    assert c.require_reply_approval is True
+    import inspect
+    from harvey.agents import handler
+    src = inspect.getsource(handler)
+    assert '"require_reply_approval", True' in src
