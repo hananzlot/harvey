@@ -47,8 +47,8 @@ DELETE_CHUNK = 100
 MAX_DISCOVER_SPEND = 5.0
 DISCOVER_PROVIDERS = {"dataforseo_listings", "osm", "cslb"}
 SUPPRESSION_INTERVAL = 30 * 60
-# Off until the app-side harvey_record_lead function is live in production.
-LEADS_ENABLED = os.environ.get("HARVEY_LEADS", "") == "1"
+# On since harvey_record_lead went live in production (2026-10-25); HARVEY_LEADS=0 turns it off.
+LEADS_ENABLED = os.environ.get("HARVEY_LEADS", "1") != "0"
 SYNCED_KINDS = ("outbox", "conversation", "prospect", "company", "activity")
 PROTECTED_TOP_LEVEL = {"postal_address", "compliance"}
 
