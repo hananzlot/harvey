@@ -14,7 +14,7 @@
   <key>ThrottleInterval</key><integer>10</integer>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/Users/chananzlotnitsky/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>/Users/chananzlotnitsky/harvey/data/logs/dashboard.out.log</string>
