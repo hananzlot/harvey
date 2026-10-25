@@ -189,7 +189,7 @@ class ComplianceConfig(BaseModel):
     # the drafted body as-is, so Harvey appends this footer at send time and
     # refuses to send while postal_address is empty.
     postal_address: str = ""
-    opt_out_line: str = 'Not the right fit? Reply "stop" and I won\'t email you again.'
+    opt_out_line: str = "Reply stop to opt out."
 
 
 class HarveyConfig(BaseModel):

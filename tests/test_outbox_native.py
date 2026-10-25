@@ -230,7 +230,7 @@ async def test_drain_sends_approved_due_items(state):
     assert provider.sent[0]["to"] == "jane@acme.com"
     assert provider.sent[0]["subject"] == "hi Jane"
     assert provider.sent[0]["body"].endswith(
-        'X · 1 Main St, Springfield\nReply "stop" to opt out.'
+        'X, 1 Main St, Springfield. Reply "stop" to opt out.'
     )
     prospect = await state.get_prospect(pid)
     assert prospect.status == "contacted"

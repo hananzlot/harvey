@@ -414,6 +414,16 @@ MIGRATIONS: list[str] = [
     -- company, whether or not it found a site.
     ALTER TABLE companies ADD COLUMN website_checked_at TIMESTAMP DEFAULT NULL;
     """,
+    # ── v12: owner names from the licence board's personnel file ──
+    """
+    CREATE TABLE IF NOT EXISTS licence_owners (
+        licence TEXT PRIMARY KEY,
+        first_name TEXT DEFAULT '',
+        last_name TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 # When a company was last profiled: the newer of the explicit check stamp
@@ -754,6 +764,56 @@ class StateManager:
                 (status, limit),
             )
             return [dict(r) for r in await cur.fetchall()]
+
+    async def licence_numbers(self) -> set[str]:
+        """Licence numbers of the licensed-contractor companies on file."""
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT external_id FROM companies WHERE external_id LIKE 'cslb:%'"
+            ) as cur:
+                return {r[0].split(":", 1)[1] for r in await cur.fetchall()}
+
+    async def save_licence_owners(self, owners) -> int:
+        async with self._connect() as db:
+            await db.executemany(
+                """INSERT INTO licence_owners (licence, first_name, last_name, title, updated_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(licence) DO UPDATE SET first_name=excluded.first_name,
+                     last_name=excluded.last_name, title=excluded.title,
+                     updated_at=CURRENT_TIMESTAMP""",
+                [(o.licence, o.first_name, o.last_name, o.title) for o in owners],
+            )
+            await db.commit()
+            return len(owners)
+
+    async def licence_owner_for_company(self, company_id: str) -> dict | None:
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT o.first_name, o.last_name, o.title FROM companies c
+                   JOIN licence_owners o ON 'cslb:' || o.licence = c.external_id
+                   WHERE c.id = ?""", (company_id,)) as cur:
+                row = await cur.fetchone()
+                return dict(row) if row else None
+
+    async def name_unnamed_licence_contacts(self) -> int:
+        """Give the owner's name to licensed-company contacts that have none."""
+        async with self._connect() as db:
+            cur = await db.execute(
+                """UPDATE prospects SET
+                     first_name = (SELECT o.first_name FROM companies c JOIN licence_owners o
+                                   ON 'cslb:' || o.licence = c.external_id WHERE c.id = prospects.company_id),
+                     last_name  = (SELECT o.last_name FROM companies c JOIN licence_owners o
+                                   ON 'cslb:' || o.licence = c.external_id WHERE c.id = prospects.company_id),
+                     title      = (SELECT o.title FROM companies c JOIN licence_owners o
+                                   ON 'cslb:' || o.licence = c.external_id WHERE c.id = prospects.company_id),
+                     contact_kind = 'person',
+                     updated_at = CURRENT_TIMESTAMP
+                   WHERE first_name = '' AND company_id IN (
+                     SELECT c.id FROM companies c JOIN licence_owners o
+                       ON 'cslb:' || o.licence = c.external_id)""")
+            await db.commit()
+            return cur.rowcount
 
     async def update_prospect_email(
         self, prospect_id: str, email: str, email_status: str

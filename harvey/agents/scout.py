@@ -1579,6 +1579,12 @@ Respond ONLY with the JSON array."""
             return None
 
         first, last = owner if owner else ("", "")
+        title = "Owner"
+        if not owner:
+            named = await self.state.licence_owner_for_company(company_id)
+            if named and named.get("first_name"):
+                first, last = named["first_name"], named.get("last_name", "")
+                title = named.get("title") or "Owner"
         prospect = Prospect(
             first_name=first,
             last_name=last,
@@ -1587,13 +1593,13 @@ Respond ONLY with the JSON array."""
             email_verified=(email_status == "verified"),
             company=company_name,
             company_id=company_id,
-            title="Owner",
+            title=title,
             seniority="c_suite",
             industry=industry,
             source=source,
             source_url=f"https://{domain}",
             personalization_notes=signal_note,
-            contact_kind="person" if owner else "business",
+            contact_kind="person" if first else "business",
         )
         if not prospect.is_valid() or await self._is_duplicate_prospect(prospect):
             return None

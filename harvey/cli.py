@@ -478,6 +478,26 @@ def cmd_discover(args):
     asyncio.run(_discover())
 
 
+def cmd_cslb_owners(args):
+    """Load owner names from the licence board's personnel CSV."""
+    from pathlib import Path
+    from harvey.collectors.cslb_personnel import read_owners
+    from harvey.state import StateManager
+
+    async def _run():
+        state = StateManager()
+        await state.init_db()
+        licences = await state.licence_numbers()
+        owners = read_owners(Path(args.path).expanduser(), licences)
+        saved = await state.save_licence_owners(list(owners.values()))
+        named = await state.name_unnamed_licence_contacts()
+        print(f"\n  Licensed companies on file: {len(licences)}")
+        print(f"  Owner names found:          {saved}")
+        print(f"  Existing contacts named:    {named}\n")
+
+    asyncio.run(_run())
+
+
 def cmd_signals(args):
     """Review the signal vocabulary — Harvey proposes, you confirm.
 
@@ -675,6 +695,11 @@ def main():
     sub.add_argument("--reject", metavar="CODES", default="",
                      help="Comma-separated codes to turn off")
     sub.set_defaults(func=cmd_signals)
+
+    sub = subparsers.add_parser(
+        "cslb-owners", help="Load owner names from the licence board's personnel CSV")
+    sub.add_argument("path", help="PersonnelData.csv from cslb.ca.gov DataPortal → Master List → Personnel")
+    sub.set_defaults(func=cmd_cslb_owners)
 
     sub = subparsers.add_parser("sending", help="Kill switch: pause/resume sending")
     sub.add_argument("sending_action", nargs="?", default="status",

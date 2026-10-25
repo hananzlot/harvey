@@ -8,6 +8,7 @@ sending domain while nobody's watching.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from harvey.brain import Brain
@@ -58,6 +59,28 @@ OPT_OUT_PATTERNS = (
     "delete my info",
     "delete my data",
 )
+
+_QUOTE_HEADER = re.compile(
+    r"^\s*(On\s.+\swrote:|-{2,}\s*Original Message\s*-{2,}|From:\s.+|Sent from my \w+)\s*$",
+    re.IGNORECASE)
+
+
+def strip_quoted_reply(text: str) -> str:
+    """The new part of a reply: everything above the quoted original
+    ('> ' lines, 'On … wrote:', 'Original Message', a 'From:' header)."""
+    out = []
+    for line in (text or "").splitlines():
+        if line.lstrip().startswith(">") or _QUOTE_HEADER.match(line):
+            break
+        out.append(line)
+    return "\n".join(out).strip()
+
+
+def is_bare_stop(text: str) -> bool:
+    """'stop', 'STOP.', 'Stop please' — the opt-out our footer asks for."""
+    first = (text or "").strip().splitlines()[0].strip().lower() if (text or "").strip() else ""
+    return bool(re.fullmatch(r"stop[.!]*(\s+(please|thanks|thank you))?[.!]*", first))
+
 
 # Phrases that mean a human must take over. Never auto-reply to these.
 ESCALATION_PATTERNS = (
@@ -185,6 +208,10 @@ class Handler:
         reply_meta: dict | None = None,
     ):
         """Classify, record, and respond to a single reply."""
+        # Read only what they wrote: replies quote our email, footer included
+        # ("Reply stop to opt out."), which would otherwise match the opt-out
+        # keywords on every single reply.
+        reply_text = strip_quoted_reply(reply_text) or reply_text
         # Find the prospect by email (indexed lookup)
         prospect = await self.state.get_prospect_by_email(lead_email)
         if not prospect:
@@ -207,7 +234,7 @@ class Handler:
         # 1. Classify intent. Hard keyword checks run FIRST and override
         # the LLM — opt-outs and legal threats must never be missed.
         text_lower = reply_text.lower()
-        if any(p in text_lower for p in OPT_OUT_PATTERNS):
+        if is_bare_stop(reply_text) or any(p in text_lower for p in OPT_OUT_PATTERNS):
             intent = "unsubscribe"
         elif any(p in text_lower for p in ESCALATION_PATTERNS):
             intent = "escalate"

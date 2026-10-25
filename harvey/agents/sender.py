@@ -308,10 +308,12 @@ class Sender:
         if not address:
             return ""
         company = self.config.persona.company
-        lines = ["", "", "--", f"{company} · {address}"]
+        line = f"{company}, {address}." if company else f"{address}."
         if c.opt_out_line:
-            lines.append(c.opt_out_line)
-        return "\n".join(lines)
+            line += f" {c.opt_out_line}"
+        # One short line under the signature (owner 2026-10-25); the address
+        # and the opt-out are what CAN-SPAM requires.
+        return "\n\n" + line
 
     async def _count_sends_today(self) -> int:
         """Count how many prospects were contacted today."""
