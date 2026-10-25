@@ -143,6 +143,15 @@ class QuietHoursConfig(BaseModel):
 class UsageConfig(BaseModel):
     max_daily_claude_percent: float = 80.0
     heartbeat_interval_minutes: int = 15
+    # Companies whose websites the scout reads per round (free page reads).
+    companies_per_cycle: int = 10
+    # Keep searching for contacts alongside writing/sending while fewer than
+    # this many contacts are waiting (new + drafted). 0 = upstream behaviour:
+    # search only when nothing at all is waiting.
+    contact_buffer: int = 0
+    # Unconfirmed ('guess') emails re-checked once a day, when the free
+    # verifier credits renew.
+    daily_rechecks: int = 0
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
 
     @field_validator("max_daily_claude_percent")
@@ -150,6 +159,20 @@ class UsageConfig(BaseModel):
     def _valid_percent(cls, v: float) -> float:
         if not 0 < v <= 100:
             raise ValueError("max_daily_claude_percent must be between 0 and 100")
+        return v
+
+    @field_validator("companies_per_cycle")
+    @classmethod
+    def _valid_companies(cls, v: int) -> int:
+        if not 1 <= v <= 100:
+            raise ValueError("companies_per_cycle must be between 1 and 100")
+        return v
+
+    @field_validator("contact_buffer", "daily_rechecks")
+    @classmethod
+    def _non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("must be 0 or more")
         return v
 
     @field_validator("heartbeat_interval_minutes")

@@ -739,6 +739,18 @@ class StateManager:
                 row = await cursor.fetchone()
                 return self._prospect_from_row(row) if row else None
 
+    async def prospects_with_email_status(self, status: str, limit: int = 20) -> list[dict]:
+        """Oldest-first prospects whose email has this verification status."""
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """SELECT id, email FROM prospects
+                   WHERE email_status = ? AND email != ''
+                   ORDER BY updated_at ASC LIMIT ?""",
+                (status, limit),
+            )
+            return [dict(r) for r in await cur.fetchall()]
+
     async def update_prospect_email(
         self, prospect_id: str, email: str, email_status: str
     ):

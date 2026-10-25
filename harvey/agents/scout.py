@@ -60,6 +60,8 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 1.5  # seconds; grows exponentially per attempt
 MAX_RESULTS_PER_QUERY = 20
 MAX_COMPANIES_PER_CYCLE = 10
+BACKFILL_CONCURRENCY = 5
+RECHECK_SETTING = "unconfirmed_recheck_date"
 MAX_PROSPECTS_PER_CYCLE = 25
 
 # Hunter domain-searches per heartbeat. The monthly budget itself is shared
@@ -151,6 +153,7 @@ class Scout:
         # site directly, so it costs no search-query budget and isn't at
         # the mercy of Serper/Bing flakiness — cheapest, most reliable win
         # available before spending any queries.
+        strategies.append(("recheck_unconfirmed", self._recheck_unconfirmed))
         strategies.append(("known_companies", self._prospect_via_known_companies))
         if self.config.channels.linkedin.enabled and self.env.linkedin_email:
             strategies.append(("linkedin", self._prospect_via_linkedin))
@@ -597,7 +600,7 @@ class Scout:
 
         try:
             companies = await self.state.companies_needing_prospects(
-                limit=MAX_COMPANIES_PER_CYCLE
+                limit=self._companies_per_cycle()
             )
         except Exception as e:
             logger.debug(f"companies_needing_prospects failed: {e}")
@@ -608,21 +611,28 @@ class Scout:
 
         logger.info(f"Scout: Backfilling contacts for {len(companies)} known companies...")
 
-        count = 0
-        for company in companies:
+        # Sites are read a few at a time: each one is a dozen page fetches,
+        # and reading them one after another made a 30-company round longer
+        # than the cycle timeout.
+        sem = asyncio.Semaphore(BACKFILL_CONCURRENCY)
+
+        async def read(company):
             domain = (company.get("domain") or "").strip()
             if not domain:
-                continue
-
-            contacts = await self._contacts_from_company(
-                company_id=company["id"],
-                domain=domain,
-                company_name=company.get("name") or self._domain_to_name(domain),
-                industry=company.get("industry") or default_industry,
-                source="known_company_backfill",
-                business_fallback=(company.get("source") or "") in BUSINESS_CONTACT_SOURCES,
-            )
-
+                return domain, []
+            async with sem:
+                try:
+                    contacts = await self._contacts_from_company(
+                        company_id=company["id"],
+                        domain=domain,
+                        company_name=company.get("name") or self._domain_to_name(domain),
+                        industry=company.get("industry") or default_industry,
+                        source="known_company_backfill",
+                        business_fallback=(company.get("source") or "") in BUSINESS_CONTACT_SOURCES,
+                    )
+                except Exception as e:
+                    logger.debug(f"Backfill failed for {domain}: {e}")
+                    contacts = []
             # Mark it checked regardless of outcome, so a company with no
             # scrapable team page rotates out instead of being retried
             # every cycle forever.
@@ -630,7 +640,13 @@ class Scout:
                 await self.state.mark_prospects_checked(company["id"])
             except Exception as e:
                 logger.debug(f"mark_prospects_checked failed for {domain}: {e}")
+            return domain, contacts
 
+        results = await asyncio.gather(*(read(c) for c in companies))
+        cap = max(MAX_PROSPECTS_PER_CYCLE, self._companies_per_cycle() * 3)
+
+        count = 0
+        for domain, contacts in results:
             for prospect in contacts:
                 await self.state.add_prospect(prospect)
                 count += 1
@@ -638,10 +654,40 @@ class Scout:
                     f"Scout: Added {prospect.display_name()} ({prospect.title}) "
                     f"at {prospect.company} [backfill{', business address' if prospect.is_business() else ''}]"
                 )
-                if count >= MAX_PROSPECTS_PER_CYCLE:
+                if count >= cap:
                     return count
 
         return count
+
+    def _companies_per_cycle(self) -> int:
+        usage = getattr(self.config, "usage", None)
+        return int(getattr(usage, "companies_per_cycle", 0) or MAX_COMPANIES_PER_CYCLE)
+
+    async def _recheck_unconfirmed(self) -> int:
+        """Once a day, re-check emails no verifier could decide ('guess').
+
+        The free verifier tier renews daily; addresses found after it ran out
+        wait as 'guess' (never sent) until this pass confirms or rejects them.
+        Returns 0 — it finds no new prospects, it only upgrades existing ones.
+        """
+        usage = getattr(self.config, "usage", None)
+        limit = int(getattr(usage, "daily_rechecks", 0) or 0)
+        if limit <= 0:
+            return 0
+        today = datetime.now().date().isoformat()
+        if await self.state.get_setting(RECHECK_SETTING) == today:
+            return 0
+        await self.state.set_setting(RECHECK_SETTING, today)
+        rows = await self.state.prospects_with_email_status("guess", limit=limit)
+        changed = 0
+        for p in rows:
+            result = await verify_address(p["email"], env=self.env, state=self.state)
+            if result.status != "guess":
+                await self.state.update_prospect_email(p["id"], result.email or p["email"], result.status)
+                changed += 1
+        if rows:
+            logger.info(f"Scout: Re-checked {len(rows)} unconfirmed email(s); {changed} now decided.")
+        return 0
 
     # ── Strategy 1: LinkedIn ──
 

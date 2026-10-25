@@ -223,6 +223,17 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
             elif action == "idle":
                 tasks.append(("analyze", analyst.run()))
 
+            # Keep the contact pipeline topped up. Upstream only searches when
+            # nothing at all is waiting, so one batch of drafts awaiting
+            # approval stalled discovery for hours. With a contact_buffer set,
+            # the scout rides along while fewer than that many are waiting.
+            buffer = getattr(config.usage, "contact_buffer", 0) or 0
+            if buffer and not any(n == "prospect" for n, _ in tasks):
+                pc = summary.get("prospects") or {}
+                waiting = sum(int(pc.get(k, 0) or 0) for k in ("new", "queued")) if isinstance(pc, dict) else 0
+                if waiting < buffer:
+                    tasks.append(("prospect", scout.run()))
+
             # Native mail providers drain the outbox every cycle — due sends
             # and approved replies must go out on schedule regardless of the
             # cycle's primary action.
