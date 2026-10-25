@@ -761,14 +761,24 @@ def build_cslb_queries(config, counties: list[str] | None = None
     from harvey.collectors import cslb
 
     icp = config.icp
-    names = cslb.resolve_counties(counties or getattr(icp, "counties", None),
-                                  icp.geography)
+    states = [s.strip().lower() for s in (getattr(icp, "states", None) or []) if s.strip()]
     pairs = cslb.classifications_for(
         list(icp.industries), getattr(icp, "cslb_classifications", None))
+    if states:
+        # State-level targeting: the licence list is California's only.
+        if not ({"california", "ca"} & set(states)):
+            return []
+        wanted = counties or getattr(icp, "counties", None)
+        batches = (cslb.county_batches(cslb.resolve_counties(wanted)) if wanted
+                   else cslb.county_batches(cslb.ALL_COUNTIES))
+    else:
+        batches = [cslb.resolve_counties(counties or getattr(icp, "counties", None),
+                                         icp.geography)]
     return [
         DiscoveryQuery(term=industry, location=f"{code}, {', '.join(names)}",
                        category=code, counties=names)
         for industry, code in pairs
+        for names in batches
     ]
 
 

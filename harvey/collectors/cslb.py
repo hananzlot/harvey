@@ -44,6 +44,16 @@ POLITE_DELAY_SECONDS = 5.0        # between downloads
 DEFAULT_CLASSIFICATIONS: dict[str, str] = {
     "roof": "C-39",      # Roofing contractor
     "solar": "C-46",     # Solar contractor
+    "remodel": "B-2",    # Residential remodeling contractor
+    "general building": "B",
+    "hvac": "C-20",      # Warm-air heating, ventilating and air-conditioning
+    "plumb": "C-36",     # Plumbing contractor
+    "electric": "C-10",  # Electrical contractor
+    "window": "C-17",    # Glazing (windows and doors)
+    "paint": "C-33",     # Painting and decorating
+    "landscap": "C-27",  # Landscaping
+    "concrete": "C-8",   # Concrete
+    "floor": "C-15",     # Flooring
 }
 
 # County name -> the form's numeric county code (all 58, from the live page).
@@ -128,6 +138,14 @@ def resolve_counties(counties: list[str] | None,
         if canon not in out:
             out.append(canon)
     return out[:MAX_COUNTIES]
+
+
+ALL_COUNTIES = [k.title() for k in COUNTY_CODES]
+
+
+def county_batches(names: list[str]) -> list[list[str]]:
+    """The form takes at most MAX_COUNTIES per download."""
+    return [names[i:i + MAX_COUNTIES] for i in range(0, len(names), MAX_COUNTIES)]
 
 
 def county_codes(names: list[str]) -> list[str]:

@@ -137,3 +137,16 @@ def test_site_state_check():
     assert site_is_californian("Roofing in Riverside and Corona", "Riverside")
     assert not site_is_californian("Raleigh, North Carolina roofing experts. Call us in NC.")
     assert not site_is_californian("")
+
+
+def test_states_targeting_plans_statewide_california_and_nothing_elsewhere():
+    from types import SimpleNamespace
+    from harvey.collectors.discover import build_cslb_queries
+    icp = SimpleNamespace(industries=["Roofing contractor", "HVAC"], geography=[], counties=[],
+                          cslb_classifications=None, states=["California"])
+    q = build_cslb_queries(SimpleNamespace(icp=icp))
+    assert {x.category for x in q} == {"C-39", "C-20"}
+    assert all(len(x.counties) <= 10 for x in q)
+    assert sum(len(x.counties) for x in q if x.category == "C-39") == 58
+    icp.states = ["Texas"]
+    assert build_cslb_queries(SimpleNamespace(icp=icp)) == []

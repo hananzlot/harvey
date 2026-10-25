@@ -70,6 +70,10 @@ class ICPConfig(BaseModel):
     # Diego, Inland Empire -> Riverside + San Bernardino), else the five SoCal
     # counties. At most 10 (the CSLB form's own limit).
     counties: list[str] = []
+    # US states to prospect in (owner 2026-10-25: "trades and states, not
+    # counties"). Today only California has a licence-list source; with
+    # California selected and no counties set, the whole state is searched.
+    states: list[str] = []
     # Extra/overriding industry-keyword -> CSLB classification, e.g.
     # {"plumb": "C-36"}. Built in: roofing -> C-39, solar -> C-46.
     cslb_classifications: dict[str, str] = {}
