@@ -168,6 +168,9 @@ class HarveyConfig(BaseModel):
     channels: ChannelsConfig = ChannelsConfig()
     usage: UsageConfig = UsageConfig()
     compliance: ComplianceConfig = ComplianceConfig()
+    # Free-text steering from the owner, injected into the writer's and the
+    # reply handler's prompts as "Direction from the owner: ...".
+    guidance: str = ""
 
 
 class EnvConfig(BaseModel):

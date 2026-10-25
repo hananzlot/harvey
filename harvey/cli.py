@@ -159,6 +159,13 @@ def cmd_dashboard(args):
     start_dashboard(host=args.host, port=args.port)
 
 
+def cmd_bridge(args):
+    """Run the Supabase bridge (mirror state up, run commands down)."""
+    from harvey.bridge import run_bridge
+
+    run_bridge()
+
+
 def cmd_status(args):
     """Show current pipeline status."""
     from harvey.state import StateManager
@@ -583,6 +590,12 @@ def main():
     sub.add_argument("--port", type=int, default=5555, help="Port (default: 5555)")
     sub.set_defaults(func=cmd_dashboard)
 
+    # harvey bridge
+    sub = subparsers.add_parser(
+        "bridge", help="Mirror state to Supabase and run remote commands"
+    )
+    sub.set_defaults(func=cmd_bridge)
+
     # harvey status
     sub = subparsers.add_parser("status", help="Show pipeline status")
     sub.set_defaults(func=cmd_status)
@@ -671,6 +684,7 @@ def main():
         print("    harvey setup     — Configure Harvey (first time)")
         print("    harvey run       — Start closing deals")
         print("    harvey dashboard — Open the web dashboard")
+        print("    harvey bridge    — Mirror state to Supabase, run remote commands")
         print()
         sys.exit(0)
 

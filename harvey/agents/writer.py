@@ -40,6 +40,11 @@ class Writer:
         self.config = config
         self.env = env
 
+    def _guidance_block(self) -> str:
+        """Owner steering (config `guidance`), or '' when empty."""
+        g = (getattr(self.config, "guidance", "") or "").strip()
+        return f"\n\nDirection from the owner: {g}" if g else ""
+
     @property
     def is_native(self) -> bool:
         return self.config.channels.email.provider in NATIVE_PROVIDERS
@@ -209,6 +214,7 @@ class Writer:
         ) or ""
         if self.skills:
             prompt += "\n\n" + self.skills
+        prompt += self._guidance_block()
 
         prompt += f"""
 
@@ -274,6 +280,7 @@ Pricing: {self.config.product.pricing}"""
         # Inject email framework skills
         if self.skills:
             prompt += "\n\n" + self.skills
+        prompt += self._guidance_block()
 
         prompt += f"""
 

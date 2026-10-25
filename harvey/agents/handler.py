@@ -562,6 +562,9 @@ Product: {self.config.product.name} — {self.config.product.description}"""
         # Inject objection handling + sales methodology skills
         if self.skills:
             prompt += "\n\n" + self.skills
+        guidance = (getattr(self.config, "guidance", "") or "").strip()
+        if guidance:
+            prompt += f"\n\nDirection from the owner: {guidance}"
 
         prompt += f"""
 
