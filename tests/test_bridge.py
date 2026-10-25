@@ -40,6 +40,8 @@ class Fake:
         self.offline = False
         self.rpc_calls: list[dict] = []
         self.rpc_reply = "updated"
+        self.lead_calls: list[dict] = []
+        self.lead_reply = "created"
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         u = urlparse(str(req.url))
@@ -65,6 +67,10 @@ class Fake:
                 for i in ids:
                     self.records.pop((kind, i), None)
                 return httpx.Response(204)
+        if path == "/rpc/harvey_record_lead":
+            body = json.loads(req.content)
+            self.lead_calls.append(body)
+            return httpx.Response(200, json=self.lead_reply)
         if path == "/rpc/harvey_record_contact_email":
             body = json.loads(req.content)
             self.rpc_calls.append(body)
@@ -503,3 +509,26 @@ def test_status_reports_hq_emails_copied(env):
     env.run(env.b.write_back_emails())
     env.push()
     assert env.data("status", "current")["hq_emails_copied"] == 1
+
+
+
+def test_record_leads_once_per_sent_email(env):
+    _seed_cslb(env)
+    env.sql("INSERT INTO outbox (id,prospect_id,to_email,subject,body,status,step,sent_at,message_id) VALUES "
+            "('ox1','pc1','office@acme.com','Increase productivity','b','sent',1,'2026-10-25 22:05:32','<m1@x>')")
+    env.sql("INSERT INTO outbox (id,prospect_id,to_email,subject,body,status,step) VALUES "
+            "('ox2','pc1','office@acme.com','later','b','approved',2)")
+    assert env.run(env.b.record_leads()) == {"created": 1}
+    call = env.fake.lead_calls[0]
+    assert (call["p_license_number"], call["p_step"], call["p_message_id"]) == ("778739", 1, "<m1@x>")
+    assert call["p_sent_at"].endswith("Z")
+    assert env.run(env.b.record_leads()) == {}
+    assert env.b.hq_leads() == 1
+
+
+def test_record_leads_skips_lost_contacts(env):
+    _seed_cslb(env)
+    env.sql("UPDATE prospects SET status='lost' WHERE id='pc1'")
+    env.sql("INSERT INTO outbox (id,prospect_id,to_email,subject,body,status,step,sent_at,message_id) VALUES "
+            "('ox1','pc1','office@acme.com','s','b','sent',1,'2026-10-25 22:05:32','<m1@x>')")
+    assert env.run(env.b.record_leads()) == {}

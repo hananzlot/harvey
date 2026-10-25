@@ -47,6 +47,8 @@ DELETE_CHUNK = 100
 MAX_DISCOVER_SPEND = 5.0
 DISCOVER_PROVIDERS = {"dataforseo_listings", "osm", "cslb"}
 SUPPRESSION_INTERVAL = 30 * 60
+# Off until the app-side harvey_record_lead function is live in production.
+LEADS_ENABLED = os.environ.get("HARVEY_LEADS", "") == "1"
 SYNCED_KINDS = ("outbox", "conversation", "prospect", "company", "activity")
 PROTECTED_TOP_LEVEL = {"postal_address", "compliance"}
 
@@ -454,6 +456,7 @@ class Bridge:
             "last_cycle_at": _iso(self._scalar(
                 conn, "SELECT MAX(created_at) FROM actions", default=None)),
             "hq_emails_copied": self.hq_emails_copied(),
+            "hq_leads_created": self.hq_leads(),
             "bridge_heartbeat_at": _now_iso(),
             "version": VERSION,
             "host": self.host,
@@ -536,6 +539,52 @@ class Bridge:
                     counts["deleted"] += len(gone)
                     self._save_cache()
         return counts
+
+    # ── HQ leads for every email sent ──
+
+    LEADS_KEY = "_hq_leads"
+
+    def _sent_to_licensees(self) -> list[dict]:
+        sql = (
+            "SELECT o.id AS oid, o.step AS step, o.subject AS subject, o.sent_at AS sent_at, "
+            "       o.message_id AS message_id, o.to_email AS to_email, c.external_id AS ext "
+            "  FROM outbox o JOIN prospects p ON p.id = o.prospect_id "
+            "  JOIN companies c ON c.id = p.company_id "
+            " WHERE o.status = 'sent' AND c.external_id LIKE 'cslb:%' "
+            "   AND p.status NOT IN ('lost', 'customer') "
+            " ORDER BY o.sent_at"
+        )
+        try:
+            with self._connect() as conn:
+                return [dict(r) for r in conn.execute(sql).fetchall()]
+        except sqlite3.Error as e:
+            logger.debug("lead read failed: %s", e)
+            return []
+
+    async def record_leads(self) -> dict[str, int]:
+        """One HQ lead per contractor emailed (reused across their emails),
+        with each sent email on its timeline. Each sent email is reported once."""
+        done = self._cache.setdefault(self.LEADS_KEY, {})
+        counts: dict[str, int] = {}
+        for row in self._sent_to_licensees():
+            if row["oid"] in done:
+                continue
+            r = await self._sb_req("POST", "/rpc/harvey_record_lead", json={
+                "p_license_number": str(row["ext"]).split(":", 1)[1],
+                "p_email": row["to_email"],
+                "p_subject": row["subject"],
+                "p_sent_at": _iso(row["sent_at"]),
+                "p_step": int(row["step"] or 1),
+                "p_message_id": row["message_id"] or row["oid"],
+            })
+            result = str(r.json())
+            done[row["oid"]] = result
+            counts[result] = counts.get(result, 0) + 1
+            self._save_cache()
+        return counts
+
+    def hq_leads(self) -> int:
+        return sum(1 for v in self._cache.get(self.LEADS_KEY, {}).values() if v == "created")
 
     # ── Existing-customer list ──
 
@@ -839,6 +888,10 @@ async def bridge_loop(bridge: Bridge, *, stop: asyncio.Event | None = None,
                 copied = await bridge.write_back_emails()
                 if copied:
                     logger.info("HQ contact write-back: %s", copied)
+                if LEADS_ENABLED:
+                    leads = await bridge.record_leads()
+                    if leads:
+                        logger.info("HQ leads: %s", leads)
                 next_push = loop.time() + snapshot_interval
             failures = 0
             delay = command_interval
