@@ -692,14 +692,14 @@ class Bridge:
             r = await self._dash.request(method, self.dashboard_url + path, **kw)
         except httpx.HTTPError as e:
             raise CommandError(
-                "Harvey's dashboard on the Studio isn't answering, so nothing was changed.") from e
+                "Outreach's dashboard on the Studio isn't answering, so nothing was changed.") from e
         try:
             body = r.json()
         except ValueError:
             body = {}
         if r.status_code >= 300 or (isinstance(body, dict) and body.get("success") is False):
             msg = (body.get("message") or body.get("error")) if isinstance(body, dict) else None
-            raise CommandError(msg or f"Harvey refused it (HTTP {r.status_code}).")
+            raise CommandError(msg or f"Outreach refused it (HTTP {r.status_code}).")
         return body if isinstance(body, dict) else {}
 
     async def execute(self, kind: str, payload: dict) -> str:
@@ -734,11 +734,11 @@ class Bridge:
 
     async def _cmd_start(self, p: dict) -> str:
         await self._dash_call("POST", "/api/harvey/start")
-        return "Harvey started."
+        return "Outreach started."
 
     async def _cmd_stop(self, p: dict) -> str:
         await self._dash_call("POST", "/api/harvey/stop")
-        return "Harvey stopped."
+        return "Outreach stopped."
 
     async def _cmd_pause_sending(self, p: dict) -> str:
         await self._dash_call("POST", "/api/sending/pause")
@@ -806,7 +806,7 @@ class Bridge:
         try:
             current = yaml.safe_load(path.read_text()) or {}
         except Exception as e:
-            raise CommandError(f"Couldn't read Harvey's settings file: {e}")
+            raise CommandError(f"Couldn't read Outreach's settings file: {e}")
 
         cur_postal = ((current.get("compliance") or {}).get("postal_address") or "")
         if "compliance" in patch:
@@ -832,7 +832,7 @@ class Bridge:
             msgs = "; ".join(
                 f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
                 for err in getattr(e, "errors", lambda: [])()) or str(e)
-            raise CommandError(f"Harvey's settings check rejected that: {msgs}"[:400])
+            raise CommandError(f"Outreach's settings check rejected that: {msgs}"[:400])
 
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -852,8 +852,8 @@ class Bridge:
         if status and status.get("running"):
             await self._dash_call("POST", "/api/harvey/stop")
             await self._dash_call("POST", "/api/harvey/start")
-            return "Settings saved and Harvey restarted with them."
-        return "Settings saved. Harvey isn't running, so they apply the next time it starts."
+            return "Settings saved and Outreach restarted with them."
+        return "Settings saved. Outreach isn't running, so they apply the next time it starts."
 
 
 # ── Entry point ──
