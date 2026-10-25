@@ -68,6 +68,20 @@ def _iso(value: Any) -> str | None:
     return s + "Z"
 
 
+def _local_iso(value: Any) -> str | None:
+    """The dashboard reports started_at as naive LOCAL time (datetime.now());
+    attach this machine's offset instead of mislabelling it UTC."""
+    if value in (None, ""):
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return _iso(value)
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return dt.isoformat()
+
+
 def _hash(data: dict) -> str:
     return hashlib.sha256(
         json.dumps(data, sort_keys=True, default=str).encode()
@@ -415,7 +429,7 @@ class Bridge:
             bounces = 0
         return {
             "running": bool(running and running.get("running")),
-            "started_at": _iso(running.get("started_at")) if running else None,
+            "started_at": _local_iso(running.get("started_at")) if running else None,
             "sending_paused": self._setting(conn, "sending_paused"),
             "sent_today": self._scalar(
                 conn, "SELECT COUNT(*) FROM outbox WHERE status='sent' "

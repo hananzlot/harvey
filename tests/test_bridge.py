@@ -436,3 +436,18 @@ def test_guidance_reaches_prompts():
     assert w._guidance_block() == "\n\nDirection from the owner: Lead with price"
     w.config = SimpleNamespace(guidance="")
     assert w._guidance_block() == ""
+
+
+def test_local_iso_attaches_machine_offset_to_naive_local_time():
+    from datetime import datetime
+    from harvey.bridge import _local_iso
+    out = _local_iso("2026-10-25T12:10:02.893702")
+    parsed = datetime.fromisoformat(out)
+    assert parsed.tzinfo is not None
+    assert parsed.replace(tzinfo=None) == datetime(2026, 10, 25, 12, 10, 2, 893702)
+
+
+def test_dashboard_start_launches_the_run_subcommand():
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parents[1].joinpath("harvey/dashboard.py").read_text()
+    assert '[sys.executable, "-m", "harvey", "run"]' in src
