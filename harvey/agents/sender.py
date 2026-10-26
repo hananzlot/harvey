@@ -536,6 +536,14 @@ class Sender:
                     item["id"], status="cancelled", error="existing iBuildPro customer")
                 continue
 
+            # iBuildPro click tracking: this email's own short link replaces the
+            # iBuildPro link before the gate sees the final body.
+            from harvey.link_tracking import track_links
+            tracked = await track_links(item["id"], item["body"])
+            if tracked != item["body"]:
+                await self.state.update_outbox_item(item["id"], body=tracked)
+                item = {**dict(item), "body": tracked}
+
             gate = pre_send_check(
                 item["to_email"], item["subject"], item["body"],
                 prospect=prospect, allow_risky=allow_risky, kind=item["kind"],
